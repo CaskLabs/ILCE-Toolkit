@@ -57,6 +57,17 @@ their available tools depend on the camera/backend. **Linux-Shell verlassen**
 returns to the PMCA session; **Strg+C senden** sends the interrupt character.
 The protocol transports text, not a full terminal emulator.
 
+For a service session on the a5000, disconnect USB, select **MENU → Setup →
+USB Connection → Mass Storage** on the camera, reconnect USB and select the
+automatic or libusb driver in the app. MTP mode cannot start service mode.
+On macOS, the mass-storage kernel driver may own the interface. The app then
+offers **Mit Administratorrechten starten** and requests authorization using
+the macOS administrator dialog. Only the service worker is authorized. It
+communicates with the GUI over an authenticated local socket, performs file
+operations with the invoking user's effective permissions, and temporarily
+raises its effective uid only around USB access and driver capture/restore. The
+normal MTP app installer and camera queries do not request administrator rights.
+
 Camera operations run in a separate process and cannot overlap. Reports and
 exports are written through temporary files and only replace their targets on
 success. Sony tokens are sent to the worker over stdin and are not stored in

@@ -100,7 +100,7 @@ def inspect_apk(path):
         return result
 
 
-def configure_usb(protocol):
+def configure_usb(protocol, operation=None):
     if getattr(sys, 'frozen', False):
         import usb.backend.libusb1
         # ctypes discovery does not reliably search inside a macOS .app bundle.
@@ -114,6 +114,10 @@ def configure_usb(protocol):
         device = original_get_device(driver)
         if device is None:
             raise RuntimeError('Keine eindeutige Sony-Kamera gefunden. USB-Verbindung und Kameramodus prüfen.')
+        if operation == 'serviceshell' and not isinstance(device, (usb.SonyMscExtCmdDevice, usb.SonySenserDevice)):
+            raise RuntimeError('Die Service-Sitzung benötigt Massenspeichermodus. '
+                'An der Kamera: MENU → Einstellung → USB-Verbindung → Massenspeich. '
+                'Danach USB neu verbinden und die Service-Sitzung erneut starten.')
         return device
 
     usb.getDevice = get_device
@@ -238,7 +242,11 @@ def dispatch(request, protocol, files):
     driver = request.get('driver') or None
     if driver not in (None, 'native', 'libusb', 'qemu'):
         raise ValueError('Ungültiger USB-Treiber.')
-    usb = configure_usb(protocol) if operation.camera or key in ('apps', 'install_catalog', 'diagnostics') else None
+    if key == 'serviceshell':
+        if driver not in (None, 'libusb'):
+            raise ValueError('Die Service-Sitzung benötigt libusb. Bitte USB-Treiber „Automatisch“ oder „libusb“ auswählen.')
+        driver = 'libusb'
+    usb = configure_usb(protocol, key) if operation.camera or key in ('apps', 'install_catalog', 'diagnostics') else None
     output = values.get('output')
     if key == 'diagnostics':
         import platform
@@ -352,7 +360,7 @@ def read_message():
     return value
 
 
-def run():
+def run(allowed_operation=None):
     protocol = Protocol(sys.stdout)
     logs = LogStream(protocol)
     files = OutputFiles()
@@ -371,6 +379,8 @@ def run():
         request = read_message()
         if request is None:
             raise ValueError('Keine Anfrage erhalten.')
+        if allowed_operation and request.get('operation') != allowed_operation:
+            raise ValueError('Dieser Kameraprozess darf nur eine Service-Sitzung starten.')
         with contextlib.redirect_stdout(logs), contextlib.redirect_stderr(logs):
             dispatch(request, protocol, files)
         logs.flush()
@@ -380,19 +390,50 @@ def run():
         success = True
         protocol.emit('done', success=True)
     except Exception as error:
+        from ..usb import InvalidCommandException
         logs.flush()
         message = str(error)
-        if 'No backend available' in message:
+        requires_admin = bool(getattr(error, 'requires_administrator', False))
+        if requires_admin:
+            message = 'macOS belegt die Kamera mit seinem Massenspeichertreiber. Für die Service-Sitzung ist eine Administratorfreigabe erforderlich.'
+        elif isinstance(error, InvalidCommandException):
+            message = 'Die Kamera unterstützt diese Funktion im aktuellen USB-Modus nicht.'
+        elif 'No backend available' in message:
             message = 'libusb fehlt. Auf macOS: brew install libusb. Danach die App erneut starten.'
         elif 'Access denied' in message:
             message = 'USB-Zugriff verweigert. Andere Kamera-Apps schließen und die USB-Verbindung erneut herstellen.'
-        protocol.emit('error', message=message, detail=traceback.format_exc())
+        protocol.emit('error', message=message, detail=traceback.format_exc(), requires_admin=requires_admin)
         protocol.emit('done', success=False)
     finally:
         builtins.input = original_input
         if not success:
             files.close(False)
     return 0 if success else 1
+
+
+def run_connected(path):
+    """Authorized helper: private IPC, user file permissions, scoped USB capture."""
+    auth_file = Path(path).parent / 'auth.json'
+    metadata = auth_file.stat()
+    auth = json.loads(auth_file.read_text())
+    if sys.platform == 'darwin' and os.getuid() == 0 and metadata.st_uid != 0:
+        import pwd
+        # File operations retain the invoking user's permissions. Only USB
+        # access temporarily raises effective uid, using the authorized real uid.
+        os.initgroups(pwd.getpwuid(metadata.st_uid).pw_name, metadata.st_gid)
+        os.setegid(metadata.st_gid)
+        os.seteuid(metadata.st_uid)
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.connect(path)
+        with connection.makefile('r', encoding='utf-8') as incoming, connection.makefile('w', encoding='utf-8') as outgoing:
+            original_stdin = sys.stdin
+            try:
+                sys.stdin = incoming
+                with contextlib.redirect_stdout(outgoing), contextlib.redirect_stderr(outgoing):
+                    Protocol(outgoing).emit('hello', token=auth['token'])
+                    return run(allowed_operation='serviceshell')
+            finally:
+                sys.stdin = original_stdin
 
 
 if __name__ == '__main__':

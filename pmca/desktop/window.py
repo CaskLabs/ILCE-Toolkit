@@ -183,6 +183,7 @@ class MainWindow(QMainWindow):
         self.tweak_boxes = {}
         self.form = self.shell_form = None
         self.market_token = ''
+        self.requires_admin = False
         self._build()
         self._menus()
         self.navigation.setCurrentRow(0)
@@ -248,6 +249,10 @@ class MainWindow(QMainWindow):
         self.run_button.setObjectName('primary')
         self.run_button.clicked.connect(self.run_operation)
         buttons.addWidget(self.run_button)
+        self.admin_button = QPushButton('Mit Administratorrechten starten')
+        self.admin_button.clicked.connect(lambda: self.start('serviceshell', {}, elevated=True))
+        self.admin_button.hide()
+        buttons.addWidget(self.admin_button)
         buttons.addStretch()
         self.required_label = label('* Pflichtfeld', 'muted')
         buttons.addWidget(self.required_label)
@@ -410,6 +415,7 @@ class MainWindow(QMainWindow):
             self.form.set_value('token', self.market_token)
         self.required_label.setVisible(any(field.required for field in operation.fields))
         self.run_button.setText(operation.title)
+        self.admin_button.setVisible(key == 'serviceshell' and self.requires_admin)
         self.results.hide()
 
     def select_key(self, key):
@@ -421,7 +427,7 @@ class MainWindow(QMainWindow):
         if self.form and not self.controller.busy:
             self.start(self.form.operation.key, self.form.values())
 
-    def start(self, key, values):
+    def start(self, key, values, elevated=False):
         if self.controller.busy:
             return
         operation = BY_KEY[key]
@@ -437,6 +443,8 @@ class MainWindow(QMainWindow):
         if key == 'market':
             self.market_token = values['token']
         self.active_operation = key
+        self.requires_admin = False
+        self.admin_button.hide()
         self.session_ready = self.action_busy = self.terminal_active = False
         self.session_tabs.hide()
         self.results.hide()
@@ -444,10 +452,18 @@ class MainWindow(QMainWindow):
         self.status.setText(operation.title + ' …')
         self.progress.setRange(0, 0)
         self.log.appendPlainText('\n── ' + operation.title + ' ──')
-        self.controller.start(key, values, self.driver.currentData())
+        if elevated:
+            self.status.setText('macOS-Administratorfreigabe für den Service-Start wird angefordert …')
+            self.log.appendPlainText('Administratorfreigabe: Nur der USB-Kameraprozess wird autorisiert; die Oberfläche bleibt unter deinem Benutzerkonto.')
+        try:
+            self.controller.start(key, values, self.driver.currentData(), elevated=elevated)
+        except (OSError, ValueError, RuntimeError) as error:
+            self.status.setText(str(error))
+            self.progress.setRange(0, 100)
+            self.progress.setValue(0)
 
     def set_busy(self, busy):
-        for widget in (self.run_button, self.driver, self.selector, self.navigation, self.form):
+        for widget in (self.run_button, self.admin_button, self.driver, self.selector, self.navigation, self.form):
             if widget:
                 widget.setEnabled(not busy)
         self.refresh_action.setEnabled(not busy)
@@ -481,6 +497,8 @@ class MainWindow(QMainWindow):
         elif kind == 'data':
             self.show_data(event['kind'], event['value'])
         elif kind == 'error':
+            self.requires_admin = bool(event.get('requires_admin')) and self.active_operation == 'serviceshell' and sys.platform == 'darwin'
+            self.admin_button.setVisible(self.requires_admin)
             self.status.setStyleSheet('color: #b33434')
             self.status.setText(event['message'])
             self.log.appendPlainText(event['message'] + '\n' + event.get('detail', ''))

@@ -51,7 +51,7 @@ OPERATIONS = (
     Operation('updatershell', 'Shell & Tweaks', 'Updater-Sitzung starten', 'Updater-Shell öffnen: Tweaks, Linux-Shell, Dateien, Bootloader, Boot-ROM und Backup-Einstellungen. Den Anweisungen auf der Kamera folgen.', (
         Field('model', 'Modell (optional)', hint='Automatisch erkennen oder z. B. ILCE-5000'),
         file_field('firmware', 'Custom-Firmware (optional)', False)), True, True),
-    Operation('serviceshell', 'Shell & Tweaks', 'Service-Sitzung starten', 'Service-Shell öffnen. Die Kamera muss im Massenspeichermodus verbunden sein; für diesen Modus werden libusb-Treiber benötigt.', camera=True, session=True),
+    Operation('serviceshell', 'Shell & Tweaks', 'Service-Sitzung starten', 'Vorbereitung: USB-Kabel abziehen. An der Kamera MENU → Einstellung → USB-Verbindung → Massenspeich. wählen, dann USB neu verbinden. USB-Treiber: Automatisch oder libusb. Belegt macOS das Interface, erscheint ein Button für die Administratorfreigabe. Der Service-Start funktioniert nicht im MTP-Modus.', camera=True, session=True),
     Operation('firmware', 'Firmware', 'Firmware installieren', 'Eine Sony-Firmwaredatei auf die angeschlossene Kamera übertragen. Den Anweisungen auf der Kamera folgen.', (
         file_field('firmware', 'Firmwaredatei (.dat)'),), True),
     Operation('guess_firmware', 'Firmware', 'Passende Firmware finden', 'Firmwareabbilder aus einem ZIP mit der Kamera auf Modellkompatibilität prüfen.', (

@@ -96,6 +96,56 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(events[-1]['success'], False)
 
+    def test_service_session_rejects_mtp_with_camera_menu_instructions(self):
+        from pmca.commands import usb
+
+        def service(driver, complete):
+            self.assertEqual(driver, 'libusb')
+            usb.getDevice(object())
+            self.fail('Must reject MTP before authentication')
+
+        with patch.object(usb, 'getDevice', return_value=object()), patch.object(usb, 'senserShellCommand', side_effect=service), patch.object(usb, 'printStatus'):
+            code, events = self.invoke(dict(operation='serviceshell', values={}))
+        self.assertEqual(code, 1)
+        message = next(event['message'] for event in events if event['event'] == 'error')
+        self.assertIn('USB-Verbindung → Massenspeich.', message)
+
+    def test_service_session_requires_libusb_driver(self):
+        from pmca.commands import usb
+        with patch.object(usb, 'senserShellCommand') as start:
+            code, events = self.invoke(dict(operation='serviceshell', values={}, driver='native'))
+        self.assertEqual(code, 1)
+        start.assert_not_called()
+        self.assertIn('libusb', next(event['message'] for event in events if event['event'] == 'error'))
+
+    def test_service_preflight_accepts_mass_storage_and_already_service_mode(self):
+        from pmca.commands import usb
+        for device_type in (usb.SonyMscExtCmdDevice, usb.SonySenserDevice):
+            with self.subTest(device_type=device_type):
+                device = object.__new__(device_type)
+                with patch.object(usb, 'getDevice', return_value=device), patch.object(usb, 'printStatus'):
+                    configured = worker.configure_usb(worker.Protocol(io.StringIO()), 'serviceshell')
+                    self.assertIs(configured.getDevice(object()), device)
+
+    def test_mass_storage_capture_error_offers_admin_restart(self):
+        from pmca.usb.driver.generic.libusb import UsbCaptureRequired
+
+        def blocked(request, protocol, files):
+            raise UsbCaptureRequired('Mass-storage driver', errno=13)
+
+        code, events = self.invoke(dict(operation='serviceshell'), blocked)
+        self.assertEqual(code, 1)
+        error = next(event for event in events if event['event'] == 'error')
+        self.assertTrue(error['requires_admin'])
+        self.assertIn('Administratorfreigabe', error['message'])
+
+    def test_connected_helper_rejects_other_operations_before_dispatch(self):
+        output = io.StringIO()
+        with patch('sys.stdin', io.StringIO(json.dumps(dict(operation='info')) + '\n')), patch('sys.stdout', output), patch.object(worker, 'dispatch') as dispatch:
+            code = worker.run(allowed_operation='serviceshell')
+        self.assertEqual(code, 1)
+        dispatch.assert_not_called()
+
     def test_stream_progress_accepts_split_print_writes(self):
         output = io.StringIO()
         stream = worker.LogStream(worker.Protocol(output))
@@ -118,6 +168,18 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertFalse(applied)
         self.assertIn('Eingabe abgebrochen', output.getvalue())
+
+    def test_unsupported_camera_command_is_not_a_permission_error(self):
+        from pmca.usb import InvalidCommandException
+
+        def unsupported(request, protocol, files):
+            raise InvalidCommandException('MTP error 0x2006')
+
+        code, events = self.invoke(dict(operation='wifi_read'), unsupported)
+        self.assertEqual(code, 1)
+        message = next(event['message'] for event in events if event['event'] == 'error')
+        self.assertIn('aktuellen USB-Modus', message)
+        self.assertNotIn('verweigert', message)
 
     def test_session_failure_is_recoverable_and_backend_stops(self):
         from pmca.platform.backend import FilePlatformBackend

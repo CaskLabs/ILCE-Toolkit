@@ -1,10 +1,11 @@
 import ast
 import json
 import os
+import sys
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import QEventLoop, QTimer
@@ -92,6 +93,77 @@ class UiTests(unittest.TestCase):
         for text in ('Model: ILCE-5000', 'Firmware version: 1.00'):
             self.window.handle_event(dict(event='log', text=text))
         self.assertEqual(self.window.camera_label.text(), 'ILCE-5000\nFirmware 1.00')
+
+    def test_admin_restart_is_only_offered_after_service_capture_error(self):
+        self.window.select_key('serviceshell')
+        self.window.active_operation = 'serviceshell'
+        with patch('pmca.desktop.window.sys.platform', 'darwin'):
+            self.window.handle_event(dict(event='error', message='Requires capture', requires_admin=True))
+        self.assertFalse(self.window.admin_button.isHidden())
+        self.window.select_key('info')
+        self.assertTrue(self.window.admin_button.isHidden())
+
+    def test_admin_transport_authenticates_and_keeps_session_bidirectional(self):
+        if sys.platform != 'darwin':
+            self.skipTest('macOS helper transport')
+        controller = Controller()
+        events = []
+        loop = QEventLoop()
+        prepared_directory = []
+        original_prepare = controller._prepare_admin_process
+
+        def prepare(process, root):
+            original_prepare(process, root)
+            prepared_directory.append(controller.ipc_directory.name)
+            path = str(Path(controller.ipc_directory.name) / 'worker.sock')
+            # Exercise the real connected helper without invoking OS authorization
+            # or opening USB: substitute only the PMCA operation in this child.
+            code = '''
+import sys
+from pmca.desktop import worker
+def dispatch(request, protocol, files):
+    protocol.emit('session_ready', commands=['help', 'exit'], help='Test session')
+    assert worker.read_message()['action'] == 'session_exit'
+worker.dispatch = dispatch
+raise SystemExit(worker.run_connected(sys.argv[1]))
+'''
+            process.setProgram(sys.executable)
+            process.setArguments(['-u', '-c', code, path])
+
+        def receive(event):
+            events.append(event)
+            if event['event'] == 'session_ready':
+                controller.send(dict(action='session_exit'))
+
+        controller.event.connect(receive)
+        controller.busy_changed.connect(lambda busy: loop.quit() if not busy else None)
+        timer = QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(loop.quit)
+        with patch.object(controller, '_prepare_admin_process', side_effect=prepare):
+            controller.start('serviceshell', elevated=True)
+            timer.start(10000)
+            loop.exec()
+        if controller.busy:
+            controller.process.kill()
+            controller.process.waitForFinished(3000)
+            self.fail('Connected helper timed out')
+        self.assertIn(dict(event='done', success=True), events)
+        self.assertFalse(any(event['event'] == 'hello' for event in events))
+        self.assertFalse(Path(prepared_directory[0]).exists())
+
+    def test_cancelled_admin_start_releases_controller(self):
+        controller = Controller()
+        controller.elevated = True
+        controller.process = Mock()
+        controller.process.readAllStandardOutput.return_value = b''
+        controller.process.readAllStandardError.return_value = b'User canceled (-128)'
+        events = []
+        controller.event.connect(events.append)
+        controller._finished(1, None)
+        self.assertFalse(controller.busy)
+        self.assertIn('abgebrochen', next(event['message'] for event in events if event['event'] == 'error'))
+        self.assertIn(dict(event='done', success=False), events)
 
     def test_controller_runs_real_worker_without_shell_argument_splitting(self):
         controller = Controller()
