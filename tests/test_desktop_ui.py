@@ -94,13 +94,57 @@ class UiTests(unittest.TestCase):
             self.window.handle_event(dict(event='log', text=text))
         self.assertEqual(self.window.camera_label.text(), 'ILCE-5000\nFirmware 1.00')
 
-    def test_admin_restart_is_only_offered_after_service_capture_error(self):
+    def test_admin_restart_is_only_offered_for_the_failed_camera_action(self):
         self.window.select_key('serviceshell')
         self.window.active_operation = 'serviceshell'
         with patch('pmca.desktop.window.sys.platform', 'darwin'):
             self.window.handle_event(dict(event='error', message='Requires capture', requires_admin=True))
         self.assertFalse(self.window.admin_button.isHidden())
         self.window.select_key('info')
+        self.assertTrue(self.window.admin_button.isHidden())
+
+    def test_admin_restart_preserves_updater_and_network_form_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            settings = Path(directory) / 'Settings with spaces.json'
+            settings.write_text('[]')
+            export = str(Path(directory) / 'Export.json')
+            cases = (
+                ('updatershell', dict(model='ILCE-5000', firmware=str(settings))),
+                ('wifi_read', dict(multi=True, output=export)),
+                ('wifi_write', dict(settings=str(settings), multi=True)),
+                ('stream_read', dict(output=export)),
+                ('stream_write', dict(settings=str(settings))),
+            )
+            for key, values in cases:
+                with self.subTest(operation=key):
+                    self.window.select_key(key)
+                    for name, value in values.items():
+                        if isinstance(value, bool):
+                            self.window.form.inputs[name].setChecked(value)
+                        else:
+                            self.window.form.set_value(name, value)
+                    self.window.active_operation = key
+                    with patch('pmca.desktop.window.sys.platform', 'darwin'):
+                        self.window.handle_event(dict(event='error', message='Requires capture', requires_admin=True))
+                    self.assertFalse(self.window.admin_button.isHidden())
+                    with patch.object(self.window.controller, 'start') as start:
+                        self.window.admin_button.click()
+                    start.assert_called_once_with(key, values, self.window.driver.currentData(), elevated=True)
+
+    def test_offline_tools_cannot_request_admin_authorization(self):
+        controller = Controller()
+        for key in ('diagnostics', 'apps', 'market_download', 'apk2spk'):
+            with self.subTest(operation=key), patch('pmca.desktop.controller.sys.platform', 'darwin'):
+                with self.assertRaises(ValueError):
+                    controller.start(key, elevated=True)
+                self.assertFalse(controller.busy)
+
+    def test_privacy_settings_action_is_separate_from_admin_restart(self):
+        self.window.select_key('serviceshell')
+        self.window.active_operation = 'serviceshell'
+        with patch('pmca.desktop.window.sys.platform', 'darwin'):
+            self.window.handle_event(dict(event='error', message='Privacy check required', requires_full_disk_access=True))
+        self.assertFalse(self.window.privacy_button.isHidden())
         self.assertTrue(self.window.admin_button.isHidden())
 
     def test_admin_transport_authenticates_and_keeps_session_bidirectional(self):

@@ -75,6 +75,7 @@ OPERATIONS = (
 )
 
 BY_KEY = {operation.key: operation for operation in OPERATIONS}
+CAMERA_OPERATIONS = frozenset(operation.key for operation in OPERATIONS if operation.camera)
 GROUPS = tuple(dict.fromkeys(operation.group for operation in OPERATIONS))
 
 

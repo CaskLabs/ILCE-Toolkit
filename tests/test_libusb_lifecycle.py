@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 
 import usb.core
 from pmca.usb.driver import UsbDeviceHandle
-from pmca.usb.driver.generic.libusb import UsbBackend, MtpContext, UsbCaptureRequired
+from pmca.usb.driver.generic.libusb import UsbBackend, MtpContext, UsbCaptureRequired, UsbCaptureBlocked
 
 
 class LibusbLifecycleTests(unittest.TestCase):
@@ -101,6 +101,19 @@ class LibusbLifecycleTests(unittest.TestCase):
             self.assertEqual(effective[0], 501)
         self.assertEqual(attempts, [0, 0])
 
+    def test_post_capture_internal_error_requests_privacy_check(self):
+        device = Mock()
+        device.get_active_configuration.return_value = {(0, 0): Mock(bInterfaceClass=8)}
+        device.is_kernel_driver_active.return_value = True
+        backend = UsbBackend(device)
+        initial = usb.core.USBError('Access denied', error_code=-3, errno=13)
+        blocked = usb.core.USBError('Other error', error_code=-99)
+        with patch('pmca.usb.driver.generic.libusb.sys.platform', 'darwin'), patch('os.getuid', return_value=0), patch('os.geteuid', return_value=0), patch('usb.util.claim_interface', side_effect=[initial, blocked]), patch.object(backend, '_capture', side_effect=lambda operation: operation(0)):
+            with self.assertRaises(UsbCaptureBlocked):
+                backend.reset()
+        backend._detached = False
+        backend.close()
+
     def test_linux_still_detaches_a_kernel_driver(self):
         device = Mock()
         device.is_kernel_driver_active.return_value = True
@@ -109,6 +122,28 @@ class LibusbLifecycleTests(unittest.TestCase):
             backend.reset()
         device.detach_kernel_driver.assert_called_once_with(0)
         backend.close()
+
+    def test_disconnected_old_identity_does_not_fail_service_session_cleanup(self):
+        device = Mock()
+        backend = UsbBackend(device)
+        backend._detached = True
+        missing = usb.core.USBError('No such device', error_code=-4, errno=19)
+        device.attach_kernel_driver.side_effect = missing
+        with patch('usb.util.release_interface', side_effect=missing), patch('usb.util.dispose_resources') as dispose, patch.object(backend, '_capture', side_effect=lambda operation: operation(0)):
+            backend.close()
+            backend.close()
+        dispose.assert_called_once_with(device)
+        self.assertTrue(backend._closed)
+
+    def test_cleanup_preserves_other_usb_errors_and_still_disposes_handles(self):
+        backend = UsbBackend(Mock())
+        backend._detached = True
+        failure = usb.core.USBError('I/O error', error_code=-1)
+        with patch('usb.util.release_interface', side_effect=failure), patch('usb.util.dispose_resources') as dispose:
+            with self.assertRaises(usb.core.USBError):
+                backend.close()
+        dispose.assert_called_once_with(backend.dev)
+        self.assertTrue(backend._closed)
 
     def test_context_releases_handles_after_success_and_failure(self):
         for fail in (False, True):

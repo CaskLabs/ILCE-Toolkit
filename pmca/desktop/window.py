@@ -4,8 +4,8 @@ from pathlib import Path
 import platform
 import sys
 
-from PySide6.QtCore import Qt, QSettings
-from PySide6.QtGui import QAction, QColor, QFont, QKeySequence, QPalette, QTextCursor
+from PySide6.QtCore import Qt, QSettings, QUrl
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QKeySequence, QPalette, QTextCursor
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog,
     QFormLayout, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
     QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea,
@@ -184,6 +184,7 @@ class MainWindow(QMainWindow):
         self.form = self.shell_form = None
         self.market_token = ''
         self.requires_admin = False
+        self.requires_privacy = False
         self._build()
         self._menus()
         self.navigation.setCurrentRow(0)
@@ -250,9 +251,13 @@ class MainWindow(QMainWindow):
         self.run_button.clicked.connect(self.run_operation)
         buttons.addWidget(self.run_button)
         self.admin_button = QPushButton('Mit Administratorrechten starten')
-        self.admin_button.clicked.connect(lambda: self.start('serviceshell', {}, elevated=True))
+        self.admin_button.clicked.connect(lambda: self.run_operation(elevated=True))
         self.admin_button.hide()
         buttons.addWidget(self.admin_button)
+        self.privacy_button = QPushButton('Datenschutzeinstellungen öffnen')
+        self.privacy_button.clicked.connect(lambda: QDesktopServices.openUrl(QUrl('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles')))
+        self.privacy_button.hide()
+        buttons.addWidget(self.privacy_button)
         buttons.addStretch()
         self.required_label = label('* Pflichtfeld', 'muted')
         buttons.addWidget(self.required_label)
@@ -415,7 +420,8 @@ class MainWindow(QMainWindow):
             self.form.set_value('token', self.market_token)
         self.required_label.setVisible(any(field.required for field in operation.fields))
         self.run_button.setText(operation.title)
-        self.admin_button.setVisible(key == 'serviceshell' and self.requires_admin)
+        self.admin_button.setVisible(key == self.active_operation and self.requires_admin)
+        self.privacy_button.setVisible(key == self.active_operation and self.requires_privacy)
         self.results.hide()
 
     def select_key(self, key):
@@ -423,9 +429,9 @@ class MainWindow(QMainWindow):
         self.navigation.setCurrentRow(GROUPS.index(operation.group))
         self.selector.setCurrentIndex(self.selector.findData(key))
 
-    def run_operation(self):
+    def run_operation(self, elevated=False):
         if self.form and not self.controller.busy:
-            self.start(self.form.operation.key, self.form.values())
+            self.start(self.form.operation.key, self.form.values(), elevated=elevated)
 
     def start(self, key, values, elevated=False):
         if self.controller.busy:
@@ -444,7 +450,9 @@ class MainWindow(QMainWindow):
             self.market_token = values['token']
         self.active_operation = key
         self.requires_admin = False
+        self.requires_privacy = False
         self.admin_button.hide()
+        self.privacy_button.hide()
         self.session_ready = self.action_busy = self.terminal_active = False
         self.session_tabs.hide()
         self.results.hide()
@@ -453,7 +461,7 @@ class MainWindow(QMainWindow):
         self.progress.setRange(0, 0)
         self.log.appendPlainText('\n── ' + operation.title + ' ──')
         if elevated:
-            self.status.setText('macOS-Administratorfreigabe für den Service-Start wird angefordert …')
+            self.status.setText('macOS-Administratorfreigabe für den Kamerazugriff wird angefordert …')
             self.log.appendPlainText('Administratorfreigabe: Nur der USB-Kameraprozess wird autorisiert; die Oberfläche bleibt unter deinem Benutzerkonto.')
         try:
             self.controller.start(key, values, self.driver.currentData(), elevated=elevated)
@@ -497,8 +505,12 @@ class MainWindow(QMainWindow):
         elif kind == 'data':
             self.show_data(event['kind'], event['value'])
         elif kind == 'error':
-            self.requires_admin = bool(event.get('requires_admin')) and self.active_operation == 'serviceshell' and sys.platform == 'darwin'
-            self.admin_button.setVisible(self.requires_admin)
+            camera_action = self.active_operation in BY_KEY and BY_KEY[self.active_operation].camera
+            self.requires_admin = bool(event.get('requires_admin')) and camera_action and sys.platform == 'darwin'
+            self.requires_privacy = bool(event.get('requires_full_disk_access')) and camera_action and sys.platform == 'darwin'
+            selected = self.form is not None and self.form.operation.key == self.active_operation
+            self.admin_button.setVisible(self.requires_admin and selected)
+            self.privacy_button.setVisible(self.requires_privacy and selected)
             self.status.setStyleSheet('color: #b33434')
             self.status.setText(event['message'])
             self.log.appendPlainText(event['message'] + '\n' + event.get('detail', ''))

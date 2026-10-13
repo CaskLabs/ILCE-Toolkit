@@ -133,11 +133,14 @@ class WorkerTests(unittest.TestCase):
         def blocked(request, protocol, files):
             raise UsbCaptureRequired('Mass-storage driver', errno=13)
 
-        code, events = self.invoke(dict(operation='serviceshell'), blocked)
-        self.assertEqual(code, 1)
-        error = next(event for event in events if event['event'] == 'error')
-        self.assertTrue(error['requires_admin'])
-        self.assertIn('Administratorfreigabe', error['message'])
+        for key in ('serviceshell', 'updatershell', 'wifi_read', 'wifi_write', 'stream_read', 'stream_write'):
+            with self.subTest(operation=key):
+                code, events = self.invoke(dict(operation=key), blocked)
+                self.assertEqual(code, 1)
+                error = next(event for event in events if event['event'] == 'error')
+                self.assertTrue(error['requires_admin'])
+                self.assertIn('Administratorfreigabe', error['message'])
+                self.assertNotIn('Service-Sitzung', error['message'])
 
     def test_connected_helper_rejects_other_operations_before_dispatch(self):
         output = io.StringIO()
@@ -145,6 +148,39 @@ class WorkerTests(unittest.TestCase):
             code = worker.run(allowed_operation='serviceshell')
         self.assertEqual(code, 1)
         dispatch.assert_not_called()
+
+    def test_authorization_is_bound_to_each_updater_or_network_action(self):
+        for allowed in ('updatershell', 'wifi_read', 'wifi_write', 'stream_read', 'stream_write'):
+            for requested in (allowed, 'info'):
+                output = io.StringIO()
+                with self.subTest(allowed=allowed, requested=requested), patch('sys.stdin', io.StringIO(json.dumps(dict(operation=requested)) + '\n')), patch('sys.stdout', output), patch.object(worker, 'dispatch') as dispatch:
+                    code = worker.run(allowed_operation=allowed)
+                if requested == allowed:
+                    self.assertEqual(code, 0)
+                    dispatch.assert_called_once()
+                else:
+                    self.assertEqual(code, 1)
+                    dispatch.assert_not_called()
+
+    def test_privileged_helper_rejects_non_camera_authorization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            auth = Path(directory) / 'auth.json'
+            auth.write_text(json.dumps(dict(token='test', operation='apk2spk')))
+            with self.assertRaises(ValueError):
+                worker.run_connected(str(Path(directory) / 'worker.sock'))
+
+    def test_privacy_block_after_capture_has_separate_gui_action(self):
+        from pmca.usb.driver.generic.libusb import UsbCaptureBlocked
+
+        def blocked(request, protocol, files):
+            raise UsbCaptureBlocked('Capture refused')
+
+        code, events = self.invoke(dict(operation='serviceshell'), blocked)
+        self.assertEqual(code, 1)
+        error = next(event for event in events if event['event'] == 'error')
+        self.assertTrue(error['requires_full_disk_access'])
+        self.assertFalse(error['requires_admin'])
+        self.assertIn('Festplattenvollzugriff', error['message'])
 
     def test_stream_progress_accepts_split_print_writes(self):
         output = io.StringIO()

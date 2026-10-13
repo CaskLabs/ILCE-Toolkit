@@ -62,11 +62,25 @@ USB Connection → Mass Storage** on the camera, reconnect USB and select the
 automatic or libusb driver in the app. MTP mode cannot start service mode.
 On macOS, the mass-storage kernel driver may own the interface. The app then
 offers **Mit Administratorrechten starten** and requests authorization using
-the macOS administrator dialog. Only the service worker is authorized. It
+the macOS administrator dialog. This authorization is also available for updater
+sessions, WLAN/streaming operations, and other camera actions when the same
+mass-storage driver blocks access. Only the worker for the selected camera action
+is authorized, and its authenticated transport rejects requests for other actions. It
 communicates with the GUI over an authenticated local socket, performs file
 operations with the invoking user's effective permissions, and temporarily
 raises its effective uid only around USB access and driver capture/restore. The
-normal MTP app installer and camera queries do not request administrator rights.
+normal MTP app installer and camera queries do not request administrator rights
+unless their USB access requires mass-storage driver capture.
+The authorized worker creates an audit session attributed to the invoking user
+before loading libusb. AppleScript's default administrator session has no audit
+user (`AU_DEFAUDITID`), which can prevent macOS from applying an existing privacy
+grant even though the worker runs as root.
+If macOS still refuses the mass-storage interface after authorization, check
+**System Settings → Privacy & Security → Full Disk Access** for **ILCE Toolkit**,
+then restart the app. Administrator authorization does not bypass that privacy
+check (see [Apple Developer Support discussion](https://developer.apple.com/forums/thread/844378)).
+This permission must be granted manually. Local ad-hoc rebuilds may require
+removing and adding the app again because its code signature changes.
 
 Camera operations run in a separate process and cannot overlap. Reports and
 exports are written through temporary files and only replace their targets on

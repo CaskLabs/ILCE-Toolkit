@@ -12,6 +12,10 @@ class UsbCaptureRequired(usb.core.USBError):
  """A real macOS mass-storage kernel driver requires authorized capture."""
  requires_administrator = True
 
+class UsbCaptureBlocked(usb.core.USBError):
+ """Capture was authorized but macOS still rejects the storage interface."""
+ requires_full_disk_access = True
+
 def _usb_access(method):
  """Use the authorized helper's real uid only while accessing IOKit/USB."""
  @wraps(method)
@@ -104,15 +108,22 @@ class UsbBackend(BaseUsbBackend):
   if not self._closed:
    try:
     if self._detached:
-     usb.util.release_interface(self.dev, 0)
+     try:
+      usb.util.release_interface(self.dev, 0)
+     except usb.core.USBError as error:
+      # Entering/leaving service mode removes the old USB identity.
+      if error.errno != 19 and error.backend_error_code != -4:
+       raise
      try:
       self._capture(self.dev.attach_kernel_driver)
      except usb.core.USBError:
       # Mode switches can disconnect the old mass-storage USB device.
       pass
    finally:
-    usb.util.dispose_resources(self.dev)
-    self._closed = True
+    try:
+     usb.util.dispose_resources(self.dev)
+    finally:
+     self._closed = True
 
  def _capture(self, operation):
   effective_uid = os.geteuid()
@@ -149,7 +160,12 @@ class UsbBackend(BaseUsbBackend):
      self.dev.detach_kernel_driver(interface)
      self._detached = True
      usb.util.claim_interface(self.dev, interface)
-    self._capture(capture_and_claim)
+    try:
+     self._capture(capture_and_claim)
+    except usb.core.USBError as capture_error:
+     if self._detached and capture_error.backend_error_code in (-3, -99):
+      raise UsbCaptureBlocked('macOS verweigert das Massenspeicher-Interface trotz Administratorfreigabe.') from capture_error
+     raise
    return
   try:
    if self.dev.is_kernel_driver_active(0):

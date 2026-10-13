@@ -16,7 +16,7 @@ import tempfile
 import threading
 import traceback
 
-from .catalog import BY_KEY, validate
+from .catalog import BY_KEY, CAMERA_OPERATIONS, validate
 
 
 class Protocol:
@@ -100,13 +100,20 @@ def inspect_apk(path):
         return result
 
 
-def configure_usb(protocol, operation=None):
+def load_libusb():
+    import usb.backend.libusb1
+    finder = None
     if getattr(sys, 'frozen', False):
-        import usb.backend.libusb1
         # ctypes discovery does not reliably search inside a macOS .app bundle.
         libraries = list(Path(sys._MEIPASS).glob('libusb-1.0*.dylib'))
         if libraries:
-            usb.backend.libusb1.get_backend(find_library=lambda name: str(libraries[0]))
+            finder = lambda name: str(libraries[0])
+    return usb.backend.libusb1.get_backend(find_library=finder)
+
+
+def configure_usb(protocol, operation=None):
+    if getattr(sys, 'frozen', False):
+        load_libusb()
     from ..commands import usb
     original_get_device = usb.getDevice
 
@@ -380,7 +387,7 @@ def run(allowed_operation=None):
         if request is None:
             raise ValueError('Keine Anfrage erhalten.')
         if allowed_operation and request.get('operation') != allowed_operation:
-            raise ValueError('Dieser Kameraprozess darf nur eine Service-Sitzung starten.')
+            raise ValueError('Dieser Kameraprozess darf nur die autorisierte Kameraaktion ausführen.')
         with contextlib.redirect_stdout(logs), contextlib.redirect_stderr(logs):
             dispatch(request, protocol, files)
         logs.flush()
@@ -394,15 +401,18 @@ def run(allowed_operation=None):
         logs.flush()
         message = str(error)
         requires_admin = bool(getattr(error, 'requires_administrator', False))
-        if requires_admin:
-            message = 'macOS belegt die Kamera mit seinem Massenspeichertreiber. Für die Service-Sitzung ist eine Administratorfreigabe erforderlich.'
+        requires_privacy = bool(getattr(error, 'requires_full_disk_access', False))
+        if requires_privacy:
+            message = 'macOS verweigert das USB-Interface trotz Administratorfreigabe. Unter Systemeinstellungen → Datenschutz & Sicherheit → Festplattenvollzugriff ILCE Toolkit hinzufügen, aktivieren und die App neu starten.'
+        elif requires_admin:
+            message = 'macOS belegt die Kamera mit seinem Massenspeichertreiber. Für diesen USB-Zugriff ist eine Administratorfreigabe erforderlich.'
         elif isinstance(error, InvalidCommandException):
             message = 'Die Kamera unterstützt diese Funktion im aktuellen USB-Modus nicht.'
         elif 'No backend available' in message:
             message = 'libusb fehlt. Auf macOS: brew install libusb. Danach die App erneut starten.'
         elif 'Access denied' in message:
             message = 'USB-Zugriff verweigert. Andere Kamera-Apps schließen und die USB-Verbindung erneut herstellen.'
-        protocol.emit('error', message=message, detail=traceback.format_exc(), requires_admin=requires_admin)
+        protocol.emit('error', message=message, detail=traceback.format_exc(), requires_admin=requires_admin, requires_full_disk_access=requires_privacy)
         protocol.emit('done', success=False)
     finally:
         builtins.input = original_input
@@ -416,8 +426,16 @@ def run_connected(path):
     auth_file = Path(path).parent / 'auth.json'
     metadata = auth_file.stat()
     auth = json.loads(auth_file.read_text())
+    operation = auth.get('operation')
+    if operation not in CAMERA_OPERATIONS:
+        raise ValueError('Dieser Hilfsprozess benötigt eine autorisierte Kameraaktion.')
     if sys.platform == 'darwin' and os.getuid() == 0 and metadata.st_uid != 0:
         import pwd
+        from .macos import initialize_audit_session
+        initialize_audit_session(metadata.st_uid, auth.get('audit_session'))
+        # libusb caches IOKit plug-ins during initialization; initialize those
+        # with the authorized identity before dropping file access privileges.
+        load_libusb()
         # File operations retain the invoking user's permissions. Only USB
         # access temporarily raises effective uid, using the authorized real uid.
         os.initgroups(pwd.getpwuid(metadata.st_uid).pw_name, metadata.st_gid)
@@ -431,7 +449,7 @@ def run_connected(path):
                 sys.stdin = incoming
                 with contextlib.redirect_stdout(outgoing), contextlib.redirect_stderr(outgoing):
                     Protocol(outgoing).emit('hello', token=auth['token'])
-                    return run(allowed_operation='serviceshell')
+                    return run(allowed_operation=operation)
             finally:
                 sys.stdin = original_stdin
 

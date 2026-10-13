@@ -10,6 +10,7 @@ import tempfile
 
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, Signal
 from PySide6.QtNetwork import QLocalServer
+from .catalog import CAMERA_OPERATIONS
 
 
 class Controller(QObject):
@@ -34,8 +35,8 @@ class Controller(QObject):
     def start(self, operation, values=None, driver=None, elevated=False):
         if self.busy:
             raise RuntimeError('Eine Aktion läuft bereits.')
-        if elevated and (sys.platform != 'darwin' or operation != 'serviceshell'):
-            raise ValueError('Administratorfreigabe ist nur für macOS-Service-Sitzungen vorgesehen.')
+        if elevated and (sys.platform != 'darwin' or operation not in CAMERA_OPERATIONS):
+            raise ValueError('Administratorfreigabe ist nur für macOS-Kameraaktionen vorgesehen.')
         self.request = dict(operation=operation, values=values or {}, driver=driver)
         self.buffer = b''
         self.stderr_buffer = b''
@@ -79,7 +80,9 @@ class Controller(QObject):
         directory = Path(self.ipc_directory.name)
         self.token = secrets.token_hex(32)
         auth = directory / 'auth.json'
-        auth.write_text(json.dumps(dict(token=self.token)), encoding='utf-8')
+        from .macos import audit_session
+        auth.write_text(json.dumps(dict(token=self.token, operation=self.request['operation'],
+                                       audit_session=audit_session())), encoding='utf-8')
         auth.chmod(0o600)
         self.server = QLocalServer(self)
         self.server.newConnection.connect(self._accept_connection)
