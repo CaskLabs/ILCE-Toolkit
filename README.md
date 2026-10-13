@@ -15,8 +15,17 @@ Download the [latest stable release](https://github.com/ma1co/Sony-PMCA-RE/relea
 ### macOS
 #### ILCE Toolkit (Apple Silicon)
 
-The new desktop interface replaces the previous Tkinter GUI. Its primary target
+ILCE Toolkit supports Sony cameras compatible with PMCA-RE, including supported
+ILCE and DSC models. Available functions depend on the camera model, firmware
+and USB mode. The interface replaces the previous Tkinter GUI; its primary target
 is macOS 14 or newer on Apple Silicon (M1 and later).
+
+English is the default interface language. Open **ILCE Toolkit → Settings**
+(**⌘,** on macOS) to select English or German. Language changes apply immediately
+and are saved for the next launch. Forms and active camera sessions are preserved.
+Source strings, identifiers, comments and documentation use English. German UI
+translations live in `pmca/desktop/locales/de.json`. Worker messages follow the
+selected language; raw PMCA protocol logs and camera data retain their original text.
 
 Run from this checkout:
 
@@ -52,16 +61,16 @@ signing and notarization. The existing CLI remains available.
 
 Select an action in the sidebar. Local file fields also accept drag-and-drop.
 Double-click an app in catalog results to prepare installation or download.
-Shell sessions own the camera connection until **Sitzung beenden** is used;
-their available tools depend on the camera/backend. **Linux-Shell verlassen**
-returns to the PMCA session; **Strg+C senden** sends the interrupt character.
+Shell sessions own the camera connection until **End session** is used;
+their available tools depend on the camera/backend. **Leave Linux shell**
+returns to the PMCA session; **Send Ctrl+C** sends the interrupt character.
 The protocol transports text, not a full terminal emulator.
 
-For a service session on the a5000, disconnect USB, select **MENU → Setup →
-USB Connection → Mass Storage** on the camera, reconnect USB and select the
+For a service session on a supported Sony camera, disconnect USB, select
+**Mass Storage** in the camera's **USB Connection** settings, reconnect USB and select the
 automatic or libusb driver in the app. MTP mode cannot start service mode.
 On macOS, the mass-storage kernel driver may own the interface. The app then
-offers **Mit Administratorrechten starten** and requests authorization using
+offers **Run with administrator access** and requests authorization using
 the macOS administrator dialog. This authorization is also available for updater
 sessions, WLAN/streaming operations, and other camera actions when the same
 mass-storage driver blocks access. Only the worker for the selected camera action

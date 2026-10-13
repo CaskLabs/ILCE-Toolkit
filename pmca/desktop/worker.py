@@ -17,6 +17,7 @@ import threading
 import traceback
 
 from .catalog import BY_KEY, CAMERA_OPERATIONS, validate
+from .i18n import get_language, set_language, tr
 
 
 class Protocol:
@@ -120,11 +121,9 @@ def configure_usb(protocol, operation=None):
     def get_device(driver):
         device = original_get_device(driver)
         if device is None:
-            raise RuntimeError('Keine eindeutige Sony-Kamera gefunden. USB-Verbindung und Kameramodus prüfen.')
+            raise RuntimeError(tr('Could not find exactly one Sony camera. Check the USB connection and camera mode.'))
         if operation == 'serviceshell' and not isinstance(device, (usb.SonyMscExtCmdDevice, usb.SonySenserDevice)):
-            raise RuntimeError('Die Service-Sitzung benötigt Massenspeichermodus. '
-                'An der Kamera: MENU → Einstellung → USB-Verbindung → Massenspeich. '
-                'Danach USB neu verbinden und die Service-Sitzung erneut starten.')
+            raise RuntimeError(tr("A service session requires Mass Storage mode. Select Mass Storage in the camera's USB Connection settings, reconnect USB, then retry the service session."))
         return device
 
     usb.getDevice = get_device
@@ -207,15 +206,15 @@ def session(backend, protocol):
                     send_tweaks()
                 elif action == 'tweaks_apply':
                     if not tweaks:
-                        raise ValueError('Keine Tweaks verfügbar.')
+                        raise ValueError(tr('No tweaks available.'))
                     settings = message.get('settings', {})
                     available = {item[0] for item in tweaks.getTweaks()}
                     if not set(settings).issubset(available):
-                        raise ValueError('Nicht unterstützter Tweak.')
+                        raise ValueError(tr('Unsupported tweak.'))
                     try:
                         for name, enabled in settings.items():
                             if not isinstance(enabled, bool):
-                                raise ValueError('Ungültiger Tweak-Wert.')
+                                raise ValueError(tr('Invalid tweak value.'))
                             tweaks.setEnabled(name, enabled)
                         tweaks.apply()
                     finally:
@@ -233,7 +232,7 @@ def session(backend, protocol):
                     else:
                         shell.commands.run(ArgParser(command))
                 else:
-                    raise ValueError('Unbekannte Sitzungsaktion.')
+                    raise ValueError(tr('Unknown session action.'))
                 protocol.emit('action_done', success=True)
             except Exception as error:
                 protocol.emit('action_done', success=False, message=str(error))
@@ -248,10 +247,10 @@ def dispatch(request, protocol, files):
     validate(operation, values)
     driver = request.get('driver') or None
     if driver not in (None, 'native', 'libusb', 'qemu'):
-        raise ValueError('Ungültiger USB-Treiber.')
+        raise ValueError(tr('Invalid USB driver.'))
     if key == 'serviceshell':
         if driver not in (None, 'libusb'):
-            raise ValueError('Die Service-Sitzung benötigt libusb. Bitte USB-Treiber „Automatisch“ oder „libusb“ auswählen.')
+            raise ValueError(tr('A service session requires libusb. Select the Automatic or libusb USB driver.'))
         driver = 'libusb'
     usb = configure_usb(protocol, key) if operation.camera or key in ('apps', 'install_catalog', 'diagnostics') else None
     output = values.get('output')
@@ -265,7 +264,7 @@ def dispatch(request, protocol, files):
             installer_certificate=(Path(usb.scriptRoot) / 'certs' / 'localtest.me.pem').is_file(),
             updater_models=len(list(usb.getFdats()))))
         if not available:
-            raise RuntimeError('libusb fehlt. Auf macOS: brew install libusb.')
+            raise RuntimeError(tr('libusb is missing. On macOS, run: brew install libusb.'))
     elif key == 'apk_inspect':
         protocol.emit('data', kind='apk', value=inspect_apk(values['apk']))
     elif key == 'info':
@@ -288,7 +287,7 @@ def dispatch(request, protocol, files):
                            values.get('package') if key == 'install_catalog' else None,
                            files.write(output, 'w'))
         if not confirmed:
-            raise RuntimeError('Die Kamera hat die Installation / Verbindung nicht bestätigt.')
+            raise RuntimeError(tr('The camera did not confirm the installation or connection.'))
     elif key == 'apps':
         protocol.emit('data', kind='apps', value=[dict(package=app.package, name=app.name,
                       description=app.desc or '', author=app.author or '', homepage=app.homepage or '')
@@ -316,7 +315,7 @@ def dispatch(request, protocol, files):
         usb.updaterShellCommand(values.get('model') or None,
                                files.read(values['firmware']) if values.get('firmware') else None, driver, complete)
         if not started:
-            raise RuntimeError('Updater-Sitzung konnte nicht gestartet werden.')
+            raise RuntimeError(tr('Could not start the updater session.'))
     elif key == 'serviceshell':
         from ..platform.backend.senser import SenserPlatformBackend
         started = []
@@ -327,7 +326,7 @@ def dispatch(request, protocol, files):
 
         usb.senserShellCommand(driver, complete)
         if not started:
-            raise RuntimeError('Service-Sitzung konnte nicht gestartet werden.')
+            raise RuntimeError(tr('Could not start the service session.'))
     elif key == 'firmware':
         usb.firmwareUpdateCommand(files.read(values['firmware']), driver)
     elif key == 'guess_firmware':
@@ -339,7 +338,7 @@ def dispatch(request, protocol, files):
         if write:
             data = json.load(write)
             if not isinstance(data, list) or any(not isinstance(item, list) or len(item) != 2 for item in data):
-                raise ValueError('Einstellungen müssen eine Liste von Schlüssel/Wert-Paaren enthalten.')
+                raise ValueError(tr('Settings must contain a list of key/value pairs.'))
             write.seek(0)
         exported = files.write(output, 'w')
         if key.startswith('wifi'):
@@ -354,7 +353,7 @@ def dispatch(request, protocol, files):
         from ..commands.backup import printBackupCommand
         printBackupCommand(files.read(values['input']))
     else:
-        raise ValueError('Unbekannte Funktion.')
+        raise ValueError(tr('Unknown operation.'))
 
 
 def read_message():
@@ -363,7 +362,7 @@ def read_message():
         return None
     value = json.loads(line)
     if not isinstance(value, dict):
-        raise ValueError('Ungültige Worker-Nachricht.')
+        raise ValueError(tr('Invalid worker message.'))
     return value
 
 
@@ -373,21 +372,23 @@ def run(allowed_operation=None):
     files = OutputFiles()
     success = False
     original_input = builtins.input
+    original_language = get_language()
 
     def prompt(text=''):
-        protocol.emit('prompt', text=text)
+        protocol.emit('prompt', text=tr(text))
         response = read_message()
         if response is None or response.get('action') != 'prompt_response' or response.get('cancelled'):
-            raise EOFError('Eingabe abgebrochen.')
+            raise EOFError(tr('Input canceled.'))
         return response.get('text', '')
 
     try:
         builtins.input = prompt
         request = read_message()
         if request is None:
-            raise ValueError('Keine Anfrage erhalten.')
+            raise ValueError(tr('No request received.'))
+        set_language(request.get('language', 'en'))
         if allowed_operation and request.get('operation') != allowed_operation:
-            raise ValueError('Dieser Kameraprozess darf nur die autorisierte Kameraaktion ausführen.')
+            raise ValueError(tr('This camera worker can only perform the authorized camera action.'))
         with contextlib.redirect_stdout(logs), contextlib.redirect_stderr(logs):
             dispatch(request, protocol, files)
         logs.flush()
@@ -399,23 +400,24 @@ def run(allowed_operation=None):
     except Exception as error:
         from ..usb import InvalidCommandException
         logs.flush()
-        message = str(error)
+        message = tr(str(error))
         requires_admin = bool(getattr(error, 'requires_administrator', False))
         requires_privacy = bool(getattr(error, 'requires_full_disk_access', False))
         if requires_privacy:
-            message = 'macOS verweigert das USB-Interface trotz Administratorfreigabe. Unter Systemeinstellungen → Datenschutz & Sicherheit → Festplattenvollzugriff ILCE Toolkit hinzufügen, aktivieren und die App neu starten.'
+            message = tr('macOS refused the USB interface despite administrator access. Add and enable ILCE Toolkit in System Settings → Privacy & Security → Full Disk Access, then restart the app.')
         elif requires_admin:
-            message = 'macOS belegt die Kamera mit seinem Massenspeichertreiber. Für diesen USB-Zugriff ist eine Administratorfreigabe erforderlich.'
+            message = tr('The macOS mass-storage driver owns the camera interface. Administrator access is required for this USB operation.')
         elif isinstance(error, InvalidCommandException):
-            message = 'Die Kamera unterstützt diese Funktion im aktuellen USB-Modus nicht.'
+            message = tr('The camera does not support this command for its model or current USB mode.')
         elif 'No backend available' in message:
-            message = 'libusb fehlt. Auf macOS: brew install libusb. Danach die App erneut starten.'
+            message = tr('libusb is missing. On macOS, run brew install libusb, then restart the app.')
         elif 'Access denied' in message:
-            message = 'USB-Zugriff verweigert. Andere Kamera-Apps schließen und die USB-Verbindung erneut herstellen.'
+            message = tr('USB access denied. Close other camera apps and reconnect the USB cable.')
         protocol.emit('error', message=message, detail=traceback.format_exc(), requires_admin=requires_admin, requires_full_disk_access=requires_privacy)
         protocol.emit('done', success=False)
     finally:
         builtins.input = original_input
+        set_language(original_language)
         if not success:
             files.close(False)
     return 0 if success else 1
@@ -428,7 +430,7 @@ def run_connected(path):
     auth = json.loads(auth_file.read_text())
     operation = auth.get('operation')
     if operation not in CAMERA_OPERATIONS:
-        raise ValueError('Dieser Hilfsprozess benötigt eine autorisierte Kameraaktion.')
+        raise ValueError(tr('This helper requires an authorized camera action.'))
     if sys.platform == 'darwin' and os.getuid() == 0 and metadata.st_uid != 0:
         import pwd
         from .macos import initialize_audit_session

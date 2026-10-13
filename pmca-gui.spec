@@ -4,6 +4,7 @@ from ctypes.util import find_library
 from pathlib import Path
 import platform
 import sys
+from PySide6.QtCore import QLibraryInfo
 
 root = Path(SPECPATH)
 mac = sys.platform == 'darwin'
@@ -17,12 +18,18 @@ if mac:
         raise SystemExit('libusb not found. Run: brew install libusb')
     binaries.append((library, '.'))
 
+datas = [(str(root / 'certs'), 'certs'),
+         (str(root / 'updatershell' / 'fdat'), 'updatershell/fdat'),
+         (str(root / 'pmca' / 'desktop' / 'locales'), 'pmca/desktop/locales')]
+qt_translation = Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)) / 'qtbase_de.qm'
+if qt_translation.is_file():
+    datas.append((str(qt_translation), 'translations'))
+
 a = Analysis(
     [str(root / 'pmca-gui.py')],
     pathex=[str(root)],
     binaries=binaries,
-    datas=[(str(root / 'certs'), 'certs'),
-           (str(root / 'updatershell' / 'fdat'), 'updatershell/fdat')],
+    datas=datas,
     hiddenimports=['usb.backend.libusb1', 'usb.backend.libusb0',
                    'pmca.usb.driver.generic.qemu'],
     excludes=['tkinter', 'PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets'],
@@ -47,6 +54,8 @@ if mac:
             'CFBundleVersion': '1',
             'LSMinimumSystemVersion': '14.0',
             'NSHighResolutionCapable': True,
+            'CFBundleDevelopmentRegion': 'en',
+            'CFBundleLocalizations': ['en', 'de'],
             'NSHumanReadableCopyright': 'CaskLabs; Sony-PMCA-RE contributors',
         },
     )

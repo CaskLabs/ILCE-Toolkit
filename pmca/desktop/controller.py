@@ -11,6 +11,7 @@ import tempfile
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, Signal
 from PySide6.QtNetwork import QLocalServer
 from .catalog import CAMERA_OPERATIONS
+from .i18n import get_language
 
 
 class Controller(QObject):
@@ -34,10 +35,10 @@ class Controller(QObject):
 
     def start(self, operation, values=None, driver=None, elevated=False):
         if self.busy:
-            raise RuntimeError('Eine Aktion läuft bereits.')
+            raise RuntimeError('An action is already running.')
         if elevated and (sys.platform != 'darwin' or operation not in CAMERA_OPERATIONS):
-            raise ValueError('Administratorfreigabe ist nur für macOS-Kameraaktionen vorgesehen.')
-        self.request = dict(operation=operation, values=values or {}, driver=driver)
+            raise ValueError('Administrator access is only available for macOS camera actions.')
+        self.request = dict(operation=operation, values=values or {}, driver=driver, language=get_language())
         self.buffer = b''
         self.stderr_buffer = b''
         self.completed = False
@@ -88,7 +89,7 @@ class Controller(QObject):
         self.server.newConnection.connect(self._accept_connection)
         path = str(directory / 'worker.sock')
         if not self.server.listen(path):
-            raise RuntimeError('Lokale Kameraverbindung konnte nicht vorbereitet werden.')
+            raise RuntimeError('Could not prepare the local camera connection.')
         arguments = [sys.executable]
         if not getattr(sys, 'frozen', False):
             arguments += ['-u', str(root / 'pmca-gui.py')]
@@ -162,7 +163,7 @@ class Controller(QObject):
 
     def _process_error(self, error):
         if error == QProcess.ProcessError.FailedToStart:
-            self.event.emit(dict(event='error', message='Kameraprozess konnte nicht gestartet werden.', detail=self.process.errorString()))
+            self.event.emit(dict(event='error', message='Could not start the camera worker.', detail=self.process.errorString()))
             self.event.emit(dict(event='done', success=False))
             self._cleanup()
 
@@ -175,7 +176,7 @@ class Controller(QObject):
         if self.stderr_buffer:
             self.event.emit(dict(event='log', text=self.stderr_buffer.decode('utf-8', 'replace')))
         if not self.completed:
-            message = 'Administratorfreigabe wurde abgebrochen oder der Kameraprozess konnte nicht gestartet werden.' if self.elevated and not self.authenticated else 'Kameraprozess wurde unerwartet beendet.'
+            message = 'Administrator authorization was canceled or the camera worker could not start.' if self.elevated and not self.authenticated else 'The camera worker exited unexpectedly.'
             self.event.emit(dict(event='error', message=message, detail='Exit code: %s' % exit_code))
             self.event.emit(dict(event='done', success=False))
         self._cleanup()

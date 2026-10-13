@@ -8,12 +8,13 @@ import unittest
 from unittest.mock import Mock, patch
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-from PySide6.QtCore import QEventLoop, QTimer
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QEventLoop, QTimer, QSettings
+from PySide6.QtWidgets import QApplication, QDialog, QComboBox, QPushButton
 
 from pmca.desktop.catalog import OPERATIONS
 from pmca.desktop.controller import Controller
 from pmca.desktop.window import MainWindow, SHELL_TOOLS
+from pmca.desktop.i18n import get_language, german_translations, set_language
 
 
 APP = QApplication.instance() or QApplication([])
@@ -21,12 +22,88 @@ APP = QApplication.instance() or QApplication([])
 
 class UiTests(unittest.TestCase):
     def setUp(self):
-        self.window = MainWindow()
+        self.directory = tempfile.TemporaryDirectory()
+        self.settings = QSettings(str(Path(self.directory.name) / 'preferences.ini'), QSettings.Format.IniFormat)
+        self.window = MainWindow(self.settings)
 
     def tearDown(self):
         self.window.close()
         self.window.deleteLater()
         APP.processEvents()
+        self.directory.cleanup()
+        set_language('en')
+
+    def test_first_launch_uses_english_and_preferences_are_accessible(self):
+        self.assertEqual(get_language(), 'en')
+        self.assertEqual(self.window.navigation.item(0).text(), 'Camera')
+        self.assertEqual(self.window.run_button.text(), 'Detect camera')
+        self.assertEqual(self.window.settings_action.text(), 'Settings')
+        self.assertFalse(self.settings.contains('language'))
+
+    def test_language_change_preserves_forms_and_active_session(self):
+        self.window.select_key('wifi_read')
+        self.window.form.set_value('output', 'Settings')
+        self.window.form.set_value('multi', True)
+        self.window.driver.setCurrentIndex(self.window.driver.findData('native'))
+        self.window.log.setPlainText('Original log')
+        self.window.handle_event(dict(event='session_ready', commands=['info', 'exit'], help='Original help'))
+        self.window.set_tweaks([dict(id='recLimit', description='Disable video recording limit', value='29m50s', enabled=True)])
+        self.window.set_busy(True)
+        original_form = self.window.form
+        with patch.object(self.window.controller, 'process', Mock()) as process:
+            self.window.change_language('de')
+            self.assertIs(self.window.controller.process, process)
+            self.assertIs(self.window.form, original_form)
+            self.assertEqual(self.window.form.values(), dict(multi=True, output='Settings'))
+            self.assertEqual(self.window.driver.currentData(), 'native')
+            self.assertEqual(self.window.driver.currentText(), german_translations()['Native'])
+            self.assertEqual(self.window.log.toPlainText(), 'Original log')
+            self.assertEqual(self.window.session_output.toPlainText(), 'Original help\n')
+            self.assertTrue(self.window.session_ready)
+            self.assertFalse(self.window.run_button.isEnabled())
+            self.assertTrue(self.window.exit_session.isEnabled())
+            self.assertTrue(self.window.tweak_boxes['recLimit'].isChecked())
+            self.assertEqual(self.window.run_button.text(), german_translations()['Read Wi-Fi settings'])
+            self.assertEqual(self.window.exit_session.text(), german_translations()['End session'])
+            self.window.change_language('en')
+            self.assertEqual(self.window.run_button.text(), 'Read Wi-Fi settings')
+            self.assertEqual(self.window.exit_session.text(), 'End session')
+
+    def test_language_is_saved_and_restored_on_launch(self):
+        self.window.change_language('de')
+        self.assertEqual(self.settings.value('language'), 'de')
+        self.window.close()
+        reopened = MainWindow(QSettings(self.settings.fileName(), QSettings.Format.IniFormat))
+        try:
+            self.assertEqual(get_language(), 'de')
+            self.assertEqual(reopened.run_button.text(), german_translations()['Detect camera'])
+        finally:
+            reopened.close()
+            reopened.deleteLater()
+
+    def test_preferences_dialog_applies_the_selected_language(self):
+        def choose_language(dialog):
+            combo = dialog.findChild(QComboBox)
+            combo.setCurrentIndex(combo.findData('de'))
+            self.assertEqual({button.text() for button in dialog.findChildren(QPushButton)}, {'Cancel', 'Apply'})
+            return QDialog.DialogCode.Accepted
+        with patch.object(QDialog, 'exec', choose_language):
+            self.window.show_preferences()
+        self.assertEqual(self.settings.value('language'), 'de')
+
+    def test_invalid_saved_language_falls_back_to_english(self):
+        self.window.change_language('unsupported')
+        self.assertEqual(get_language(), 'en')
+        self.assertEqual(self.window.run_button.text(), 'Detect camera')
+
+    def test_worker_error_status_changes_language_without_rewriting_the_log(self):
+        message = 'The camera does not support this command for its model or current USB mode.'
+        self.window.change_language('de')
+        self.window.handle_event(dict(event='error', message=german_translations()[message]))
+        original_log = self.window.log.toPlainText()
+        self.window.change_language('en')
+        self.assertEqual(self.window.status.text(), message)
+        self.assertEqual(self.window.log.toPlainText(), original_log)
 
     def test_every_cli_command_has_an_accessible_gui_operation(self):
         source = Path(__file__).resolve().parents[1] / 'pmca-console.py'
@@ -85,7 +162,7 @@ class UiTests(unittest.TestCase):
 
     def test_cancelled_prompt_does_not_send_apply_choice(self):
         with patch('pmca.desktop.window.QInputDialog.getText', return_value=('', False)), patch.object(self.window.controller, 'send') as send:
-            self.window.handle_event(dict(event='prompt', text='Tweak auswählen'))
+            self.window.handle_event(dict(event='prompt', text='Select tweak'))
         send.assert_called_once_with(dict(action='prompt_response', text='', cancelled=True))
 
     def test_camera_info_updates_sidebar(self):
@@ -206,7 +283,7 @@ raise SystemExit(worker.run_connected(sys.argv[1]))
         controller.event.connect(events.append)
         controller._finished(1, None)
         self.assertFalse(controller.busy)
-        self.assertIn('abgebrochen', next(event['message'] for event in events if event['event'] == 'error'))
+        self.assertIn('canceled', next(event['message'] for event in events if event['event'] == 'error'))
         self.assertIn(dict(event='done', success=False), events)
 
     def test_controller_runs_real_worker_without_shell_argument_splitting(self):

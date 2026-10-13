@@ -155,7 +155,7 @@ class UsbBackend(BaseUsbBackend):
     if (error.errno not in (13, 16) and error.backend_error_code not in (-3, -6, -99)) or interface.bInterfaceClass != USB_CLASS_MSC or not self.dev.is_kernel_driver_active(0):
      raise
     if os.getuid() != 0:
-     raise UsbCaptureRequired('macOS-Massenspeichertreiber belegt das USB-Interface.', errno=13) from error
+     raise UsbCaptureRequired('The macOS mass-storage driver owns the USB interface.', errno=13) from error
     def capture_and_claim(interface):
      self.dev.detach_kernel_driver(interface)
      self._detached = True
@@ -164,7 +164,7 @@ class UsbBackend(BaseUsbBackend):
      self._capture(capture_and_claim)
     except usb.core.USBError as capture_error:
      if self._detached and capture_error.backend_error_code in (-3, -99):
-      raise UsbCaptureBlocked('macOS verweigert das Massenspeicher-Interface trotz Administratorfreigabe.') from capture_error
+      raise UsbCaptureBlocked('macOS refused the mass-storage interface despite administrator access.') from capture_error
      raise
    return
   try:

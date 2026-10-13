@@ -14,6 +14,6 @@ if __name__ == '__main__':
         from pmca.desktop.window import main
     except ModuleNotFoundError as error:
         if error.name == 'PySide6':
-            raise SystemExit('GUI-Abhängigkeiten fehlen. Bitte ausführen: python -m pip install -r requirements-gui.txt')
+            raise SystemExit('GUI dependencies are missing. Run: python -m pip install -r requirements-gui.txt')
         raise
     raise SystemExit(main())

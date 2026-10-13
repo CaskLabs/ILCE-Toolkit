@@ -51,9 +51,9 @@ def initialize_audit_session(user, session):
     not copy the all-ones masks returned to unprivileged callers.
     """
     if os.geteuid() != 0:
-        raise PermissionError('Die macOS-Benutzersitzung benötigt einen autorisierten Hilfsprozess.')
+        raise PermissionError('The macOS user session requires an authorized helper.')
     if not isinstance(session, dict) or session.get('user') != user:
-        raise ValueError('Die macOS-Benutzersitzung passt nicht zum aufrufenden Benutzer.')
+        raise ValueError('The macOS session does not match the invoking user.')
     library = _library()
     info = _AuditInfo()
     _check(library.getaudit_addr(ctypes.byref(info), ctypes.sizeof(info)))

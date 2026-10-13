@@ -4,15 +4,18 @@ from pathlib import Path
 import platform
 import sys
 
-from PySide6.QtCore import Qt, QSettings, QUrl
+from PySide6.QtCore import Qt, QSettings, QUrl, QObject, QLibraryInfo, QTranslator
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QKeySequence, QPalette, QTextCursor
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog,
     QFormLayout, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
-    QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea,
+    QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QDialog,
     QSplitter, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .catalog import BY_KEY, GROUPS, OPERATIONS, Field, Operation, validate
 from .controller import Controller
+from .i18n import get_language, set_language, tr, set_text, retranslate
+
+DRIVER_OPTIONS = (('Automatic', None), ('libusb', 'libusb'), ('Native', 'native'), ('QEMU', 'qemu'))
 
 STYLE = '''
 QMainWindow, QWidget#content { background: #f3f5f8; color: #18253d; }
@@ -45,10 +48,23 @@ QLabel#status { font-weight: 600; }
 
 
 def label(text, name=None, wrap=False):
-    result = QLabel(text)
+    result = QLabel()
+    set_text(result, text)
     if name:
         result.setObjectName(name)
     result.setWordWrap(wrap)
+    return result
+
+
+def make_button(text):
+    result = QPushButton()
+    set_text(result, text)
+    return result
+
+
+def make_action(text, parent):
+    result = QAction(parent)
+    set_text(result, text)
     return result
 
 
@@ -60,20 +76,20 @@ class FileInput(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.edit = QLineEdit()
-        self.edit.setPlaceholderText(field.hint or 'Datei auswählen oder hier hineinziehen')
+        set_text(self.edit, field.hint or 'Choose a file or drag it here', 'setPlaceholderText')
         self.edit.setAcceptDrops(False)
-        self.edit.setAccessibleName(field.label)
-        button = QPushButton('Auswählen …')
+        set_text(self.edit, field.label, 'setAccessibleName')
+        button = make_button('Browse…')
         button.clicked.connect(self.browse)
         layout.addWidget(self.edit, 1)
         layout.addWidget(button)
 
     def browse(self):
         if self.field.kind == 'directory':
-            path = QFileDialog.getExistingDirectory(self, self.field.label, self.edit.text())
+            path = QFileDialog.getExistingDirectory(self, tr(self.field.label), self.edit.text())
         else:
             dialog = QFileDialog.getSaveFileName if self.field.kind == 'output' else QFileDialog.getOpenFileName
-            path, _ = dialog(self, self.field.label, self.edit.text())
+            path, _ = dialog(self, tr(self.field.label), self.edit.text())
         if path:
             self.edit.setText(path)
 
@@ -105,21 +121,22 @@ class OperationForm(QWidget):
             if field.kind in ('file', 'output', 'directory'):
                 widget = FileInput(field)
             elif field.kind == 'check':
-                widget = QCheckBox('Aktivieren')
+                widget = QCheckBox()
+                set_text(widget, 'Enable')
             elif field.kind == 'package':
                 widget = QComboBox()
                 widget.setEditable(True)
                 widget.addItems(packages)
                 widget.setCurrentText('')
-                widget.lineEdit().setPlaceholderText(field.hint)
+                set_text(widget.lineEdit(), field.hint, 'setPlaceholderText')
             else:
                 widget = QLineEdit()
-                widget.setPlaceholderText(field.hint)
+                set_text(widget, field.hint, 'setPlaceholderText')
                 if field.kind == 'password':
                     widget.setEchoMode(QLineEdit.EchoMode.Password)
-            widget.setAccessibleName(field.label)
+            set_text(widget, field.label, 'setAccessibleName')
             self.inputs[field.key] = widget
-            layout.addRow(field.label + (' *' if field.required else ''), widget)
+            layout.addRow(label(field.label + (' *' if field.required else '')), widget)
 
     def values(self):
         result = {}
@@ -142,33 +159,38 @@ class OperationForm(QWidget):
             widget.setCurrentText(value)
         elif isinstance(widget, QLineEdit):
             widget.setText(value)
+        elif isinstance(widget, QCheckBox):
+            widget.setChecked(bool(value))
 
 
 SHELL_TOOLS = (
-    ('info', 'Geräteinformationen', ()),
-    ('push', 'Datei auf Kamera kopieren', (Field('local', 'Lokale Datei', 'file', True), Field('remote', 'Kamerapfad', required=True))),
-    ('pull', 'Datei von Kamera kopieren', (Field('remote', 'Kamerapfad', required=True), Field('local', 'Speichern als', 'output', True))),
-    ('bootloader', 'Bootloader sichern', (Field('directory', 'Zielverzeichnis', 'directory', True),)),
-    ('bootrom', 'Boot-ROM sichern', (Field('local', 'Speichern als', 'output', True),)),
-    ('install', 'APK über Shell installieren', (Field('local', 'APK-Datei', 'file', True),)),
-    ('bk r', 'Backup-Eigenschaft lesen', (Field('id', 'Eigenschafts-ID (hex)', required=True),)),
-    ('bk w', 'Backup-Eigenschaft schreiben', (Field('id', 'Eigenschafts-ID (hex)', required=True), Field('data', 'Daten (Hexbytes)', required=True))),
-    ('bk patch', 'Backup-Eigenschaft patchen', (Field('id', 'Eigenschafts-ID (hex)', required=True), Field('data', 'Daten (Hexbytes)', required=True))),
-    ('bk s', 'Backup auf Kamera synchronisieren', ()),
-    ('bk lock', 'Backup-Schreibschutz aktivieren', ()),
-    ('bk unlock', 'Backup-Schreibschutz aufheben', ()),
+    ('info', 'Device information', ()),
+    ('push', 'Copy file to camera', (Field('local', 'Local file', 'file', True), Field('remote', 'Camera path', required=True))),
+    ('pull', 'Copy file from camera', (Field('remote', 'Camera path', required=True), Field('local', 'Save as', 'output', True))),
+    ('bootloader', 'Dump bootloader', (Field('directory', 'Destination directory', 'directory', True),)),
+    ('bootrom', 'Dump boot ROM', (Field('local', 'Save as', 'output', True),)),
+    ('install', 'Install APK through shell', (Field('local', 'APK file', 'file', True),)),
+    ('bk r', 'Read backup property', (Field('id', 'Property ID (hex)', required=True),)),
+    ('bk w', 'Write backup property', (Field('id', 'Property ID (hex)', required=True), Field('data', 'Data (hex bytes)', required=True))),
+    ('bk patch', 'Patch backup property', (Field('id', 'Property ID (hex)', required=True), Field('data', 'Data (hex bytes)', required=True))),
+    ('bk s', 'Sync backup to camera', ()),
+    ('bk lock', 'Enable backup write protection', ()),
+    ('bk unlock', 'Disable backup write protection', ()),
 )
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, settings=None):
         super().__init__()
         self.setWindowTitle('ILCE Toolkit')
         self.resize(1180, 850)
         self.setMinimumSize(940, 700)
         if sys.platform == 'darwin':
             self.setUnifiedTitleAndToolBarOnMac(True)
-        self.settings = QSettings('CaskLabs', 'ILCE Toolkit')
+        self.settings = settings if settings is not None else QSettings('CaskLabs', 'ILCE Toolkit')
+        set_language(self.settings.value('language', 'en'))
+        self.qt_translator = None
+        self._set_qt_language()
         geometry = self.settings.value('geometry')
         if geometry:
             self.restoreGeometry(geometry)
@@ -183,6 +205,7 @@ class MainWindow(QMainWindow):
         self.tweak_boxes = {}
         self.form = self.shell_form = None
         self.market_token = ''
+        self.last_result = None
         self.requires_admin = False
         self.requires_privacy = False
         self._build()
@@ -205,13 +228,13 @@ class MainWindow(QMainWindow):
         side.addSpacing(28)
         self.navigation = QListWidget()
         self.navigation.setObjectName('navigation')
-        self.navigation.addItems(GROUPS)
+        self.navigation.addItems([tr(group) for group in GROUPS])
         self.navigation.currentRowChanged.connect(self.select_group)
         side.addWidget(self.navigation, 1)
-        self.camera_label = label('Keine Kamera geprüft', wrap=True)
+        self.camera_label = label('No camera checked', wrap=True)
         side.addWidget(self.camera_label)
         side.addSpacing(12)
-        side.addWidget(label('macOS · Apple Silicon\nLokale USB-Verbindung', 'eyebrow'))
+        side.addWidget(label('macOS · Apple Silicon\nLocal USB connection', 'eyebrow'))
         outer.addWidget(sidebar)
         content = QWidget()
         content.setObjectName('content')
@@ -221,10 +244,11 @@ class MainWindow(QMainWindow):
         top = QHBoxLayout()
         self.title = label('', 'title')
         top.addWidget(self.title, 1)
-        top.addWidget(label('USB-Treiber', 'muted'))
+        top.addWidget(label('USB driver', 'muted'))
         self.driver = QComboBox()
-        for name, value in [('Automatisch', None), ('libusb', 'libusb'), ('Native', 'native'), ('QEMU', 'qemu')]:
-            self.driver.addItem(name, value)
+        self.driver.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        for name, value in DRIVER_OPTIONS:
+            self.driver.addItem(tr(name), value)
         top.addWidget(self.driver)
         layout.addLayout(top)
         self.splitter = QSplitter(Qt.Orientation.Vertical)
@@ -246,20 +270,20 @@ class MainWindow(QMainWindow):
         self.form_layout = QVBoxLayout()
         card_layout.addLayout(self.form_layout)
         buttons = QHBoxLayout()
-        self.run_button = QPushButton('Ausführen')
+        self.run_button = make_button('Run')
         self.run_button.setObjectName('primary')
         self.run_button.clicked.connect(self.run_operation)
         buttons.addWidget(self.run_button)
-        self.admin_button = QPushButton('Mit Administratorrechten starten')
+        self.admin_button = make_button('Run with administrator access')
         self.admin_button.clicked.connect(lambda: self.run_operation(elevated=True))
         self.admin_button.hide()
         buttons.addWidget(self.admin_button)
-        self.privacy_button = QPushButton('Datenschutzeinstellungen öffnen')
+        self.privacy_button = make_button('Open privacy settings')
         self.privacy_button.clicked.connect(lambda: QDesktopServices.openUrl(QUrl('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles')))
         self.privacy_button.hide()
         buttons.addWidget(self.privacy_button)
         buttons.addStretch()
-        self.required_label = label('* Pflichtfeld', 'muted')
+        self.required_label = label('* Required field', 'muted')
         buttons.addWidget(self.required_label)
         card_layout.addLayout(buttons)
         body_layout.addWidget(card)
@@ -281,11 +305,11 @@ class MainWindow(QMainWindow):
         log_layout = QVBoxLayout(log_panel)
         log_layout.setContentsMargins(0, 0, 0, 0)
         log_top = QHBoxLayout()
-        log_top.addWidget(label('Protokoll', 'cardTitle'))
+        log_top.addWidget(label('Log', 'cardTitle'))
         log_top.addStretch()
-        export = QPushButton('Exportieren …')
+        export = make_button('Export…')
         export.clicked.connect(self.export_log)
-        clear = QPushButton('Leeren')
+        clear = make_button('Clear')
         clear.clicked.connect(lambda: self.log.clear())
         log_top.addWidget(export)
         log_top.addWidget(clear)
@@ -298,7 +322,7 @@ class MainWindow(QMainWindow):
         self.splitter.addWidget(log_panel)
         self.splitter.setSizes([510, 190])
         layout.addWidget(self.splitter, 1)
-        self.status = label('Bereit. Kamera verbinden und eine Aktion auswählen.', 'status', True)
+        self.status = label('Ready. Connect a camera and select an action.', 'status', True)
         layout.addWidget(self.status)
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
@@ -309,28 +333,102 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
     def _menus(self):
-        menu = self.menuBar().addMenu('Datei')
-        export = QAction('Protokoll exportieren …', self)
+        menu = self._menu('File')
+        self.settings_action = make_action('Settings', self)
+        self.settings_action.setMenuRole(QAction.MenuRole.PreferencesRole)
+        self.settings_action.setShortcut(QKeySequence.StandardKey.Preferences)
+        self.settings_action.triggered.connect(self.show_preferences)
+        menu.addAction(self.settings_action)
+        menu.addSeparator()
+        export = make_action('Export log…', self)
         export.triggered.connect(self.export_log)
         menu.addAction(export)
-        close = QAction('Fenster schließen', self)
+        close = make_action('Close window', self)
         close.setShortcut(QKeySequence.StandardKey.Close)
         close.triggered.connect(self.close)
         menu.addAction(close)
-        menu = self.menuBar().addMenu('Kamera')
-        self.refresh_action = QAction('Kamera erkennen', self)
+        menu = self._menu('Camera')
+        self.refresh_action = make_action('Detect camera', self)
         self.refresh_action.setShortcut(QKeySequence('Ctrl+R'))
         self.refresh_action.triggered.connect(lambda: self.start('info', {}))
         menu.addAction(self.refresh_action)
-        run = QAction('Aktion ausführen', self)
+        run = make_action('Run action', self)
         run.setShortcut(QKeySequence('Ctrl+Return'))
         run.triggered.connect(self.run_operation)
         menu.addAction(run)
-        menu = self.menuBar().addMenu('Hilfe')
-        about = QAction('Über ILCE Toolkit', self)
+        menu = self._menu('Help')
+        about = make_action('About ILCE Toolkit', self)
         about.setMenuRole(QAction.MenuRole.AboutRole)
         about.triggered.connect(self.about)
         menu.addAction(about)
+
+    def _menu(self, title):
+        menu = self.menuBar().addMenu(tr(title))
+        set_text(menu, title, 'setTitle')
+        return menu
+
+    def _set_qt_language(self):
+        app = QApplication.instance()
+        if self.qt_translator is not None:
+            app.removeTranslator(self.qt_translator)
+            self.qt_translator = None
+        if get_language() == 'de':
+            directory = Path(sys._MEIPASS) / 'translations' if getattr(sys, 'frozen', False) else Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath))
+            translator = QTranslator(self)
+            if translator.load(str(directory / 'qtbase_de.qm')):
+                app.installTranslator(translator)
+                self.qt_translator = translator
+
+    def show_preferences(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle(tr('Settings'))
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(label('Choose the interface language. Changes take effect immediately and are saved for the next launch.', 'muted', True))
+        form = QFormLayout()
+        languages = QComboBox()
+        for code, name in (('en', 'English'), ('de', 'German')):
+            languages.addItem(tr(name), code)
+        languages.setCurrentIndex(languages.findData(get_language()))
+        languages.setAccessibleName(tr('Language'))
+        form.addRow(tr('Language'), languages)
+        layout.addLayout(form)
+        row = QHBoxLayout()
+        row.addStretch()
+        cancel = make_button('Cancel')
+        cancel.clicked.connect(dialog.reject)
+        apply = make_button('Apply')
+        apply.setDefault(True)
+        apply.clicked.connect(dialog.accept)
+        row.addWidget(cancel)
+        row.addWidget(apply)
+        layout.addLayout(row)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.change_language(languages.currentData())
+
+    def change_language(self, language):
+        set_language(language)
+        self.settings.setValue('language', get_language())
+        self.settings.sync()
+        self._set_qt_language()
+        for widget in self.findChildren(QObject):
+            retranslate(widget)
+        for index, group in enumerate(GROUPS):
+            self.navigation.item(index).setText(tr(group))
+        for index in range(self.selector.count()):
+            self.selector.setItemText(index, tr(BY_KEY[self.selector.itemData(index)].title))
+        for index, (name, _) in enumerate(DRIVER_OPTIONS):
+            self.driver.setItemText(index, tr(name))
+        for index, (_, title, _) in enumerate(SHELL_TOOLS):
+            self.shell_selector.setItemText(index, tr(title))
+        for index, title in enumerate(('Terminal', 'Tweaks', 'Files & Backup')):
+            self.session_tabs.setTabText(index, tr(title))
+        for box in self.tweak_boxes.values():
+            box.setText(tr(box.property('tweak_description')) + ' · ' + box.property('tweak_value'))
+        if self.last_result is not None and not self.results.isHidden():
+            self.show_data(*self.last_result)
+        for widget in self.findChildren(QWidget):
+            if widget.layout() is not None:
+                widget.layout().invalidate()
 
     def _build_session(self):
         page = QWidget()
@@ -342,21 +440,21 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.session_output)
         row = QHBoxLayout()
         self.command = QLineEdit()
-        self.command.setPlaceholderText('PMCA-Befehl, z. B. help, info, pull /tmp/file …')
+        set_text(self.command, 'PMCA command, e.g. help, info, pull /tmp/file…', 'setPlaceholderText')
         self.command.returnPressed.connect(self.send_command)
-        self.command_button = QPushButton('Senden')
+        self.command_button = make_button('Send')
         self.command_button.clicked.connect(self.send_command)
         row.addWidget(self.command, 1)
         row.addWidget(self.command_button)
         layout.addLayout(row)
         row = QHBoxLayout()
-        self.linux_button = QPushButton('Linux-Shell öffnen')
+        self.linux_button = make_button('Open Linux shell')
         self.linux_button.clicked.connect(lambda: self.session_action(dict(action='terminal_start')))
-        self.terminal_stop = QPushButton('Linux-Shell verlassen')
+        self.terminal_stop = make_button('Leave Linux shell')
         self.terminal_stop.clicked.connect(self.stop_terminal)
-        self.interrupt_button = QPushButton('Strg+C senden')
+        self.interrupt_button = make_button('Send Ctrl+C')
         self.interrupt_button.clicked.connect(lambda: self.controller.send(dict(action='terminal_input', text='\x03')))
-        self.exit_session = QPushButton('Sitzung beenden')
+        self.exit_session = make_button('End session')
         self.exit_session.clicked.connect(lambda: self.session_action(dict(action='session_exit')))
         for button in (self.linux_button, self.terminal_stop, self.interrupt_button, self.exit_session):
             row.addWidget(button)
@@ -364,11 +462,11 @@ class MainWindow(QMainWindow):
         self.session_tabs.addTab(page, 'Terminal')
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.addWidget(label('Tweaks werden aus der Kamera gelesen. Änderungen mit „Übernehmen“ schreiben.', 'muted', True))
+        layout.addWidget(label('Tweaks are read from the camera. Select Apply changes to write your changes.', 'muted', True))
         self.tweak_form = QWidget()
         self.tweak_form_layout = QVBoxLayout(self.tweak_form)
         layout.addWidget(self.tweak_form)
-        self.apply_tweaks = QPushButton('Änderungen übernehmen')
+        self.apply_tweaks = make_button('Apply changes')
         self.apply_tweaks.setObjectName('primary')
         self.apply_tweaks.clicked.connect(lambda: self.session_action(dict(action='tweaks_apply', settings={key: box.isChecked() for key, box in self.tweak_boxes.items()})))
         layout.addWidget(self.apply_tweaks)
@@ -378,16 +476,16 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         self.shell_selector = QComboBox()
         for command, title, fields in SHELL_TOOLS:
-            self.shell_selector.addItem(title, command)
+            self.shell_selector.addItem(tr(title), command)
         self.shell_selector.currentIndexChanged.connect(self.select_shell_tool)
         layout.addWidget(self.shell_selector)
         self.shell_form_layout = QVBoxLayout()
         layout.addLayout(self.shell_form_layout)
-        self.shell_run = QPushButton('Ausführen')
+        self.shell_run = make_button('Run')
         self.shell_run.clicked.connect(self.run_shell_tool)
         layout.addWidget(self.shell_run)
         layout.addStretch()
-        self.session_tabs.addTab(page, 'Dateien & Backup')
+        self.session_tabs.addTab(page, tr('Files & Backup'))
         self.select_shell_tool(0)
         self.update_session_controls()
 
@@ -395,12 +493,12 @@ class MainWindow(QMainWindow):
         if index < 0:
             return
         group = GROUPS[index]
-        self.title.setText(group)
+        set_text(self.title, group)
         self.selector.blockSignals(True)
         self.selector.clear()
         for operation in OPERATIONS:
             if operation.group == group:
-                self.selector.addItem(operation.title, operation.key)
+                self.selector.addItem(tr(operation.title), operation.key)
         self.selector.blockSignals(False)
         self.select_operation(0)
 
@@ -409,7 +507,7 @@ class MainWindow(QMainWindow):
         if not key:
             return
         operation = BY_KEY[key]
-        self.description.setText(operation.description)
+        set_text(self.description, operation.description)
         if self.form:
             self.form_layout.removeWidget(self.form)
             self.form.hide()
@@ -419,7 +517,7 @@ class MainWindow(QMainWindow):
         if key == 'market_download':
             self.form.set_value('token', self.market_token)
         self.required_label.setVisible(any(field.required for field in operation.fields))
-        self.run_button.setText(operation.title)
+        set_text(self.run_button, operation.title)
         self.admin_button.setVisible(key == self.active_operation and self.requires_admin)
         self.privacy_button.setVisible(key == self.active_operation and self.requires_privacy)
         self.results.hide()
@@ -440,11 +538,11 @@ class MainWindow(QMainWindow):
         try:
             validate(operation, values)
         except (ValueError, TypeError) as error:
-            QMessageBox.information(self, 'Eingabe prüfen', str(error))
+            QMessageBox.information(self, tr('Check input'), tr(str(error)))
             return
         output = values.get('output')
         if output and Path(output).exists():
-            if QMessageBox.question(self, 'Datei ersetzen?', 'Die Zieldatei existiert bereits. Soll sie ersetzt werden?') != QMessageBox.StandardButton.Yes:
+            if QMessageBox.question(self, tr('Replace file?'), tr('The destination file already exists. Replace it?')) != QMessageBox.StandardButton.Yes:
                 return
         if key == 'market':
             self.market_token = values['token']
@@ -457,16 +555,16 @@ class MainWindow(QMainWindow):
         self.session_tabs.hide()
         self.results.hide()
         self.status.setStyleSheet('color: #263b59')
-        self.status.setText(operation.title + ' …')
+        set_text(self.status, operation.title + ' …')
         self.progress.setRange(0, 0)
-        self.log.appendPlainText('\n── ' + operation.title + ' ──')
+        self.log.appendPlainText('\n── ' + tr(operation.title) + ' ──')
         if elevated:
-            self.status.setText('macOS-Administratorfreigabe für den Kamerazugriff wird angefordert …')
-            self.log.appendPlainText('Administratorfreigabe: Nur der USB-Kameraprozess wird autorisiert; die Oberfläche bleibt unter deinem Benutzerkonto.')
+            set_text(self.status, 'Requesting macOS administrator access for the camera…')
+            self.log.appendPlainText(tr('Administrator access: only the USB camera worker is authorized; the interface runs under your user account.'))
         try:
             self.controller.start(key, values, self.driver.currentData(), elevated=elevated)
         except (OSError, ValueError, RuntimeError) as error:
-            self.status.setText(str(error))
+            set_text(self.status, str(error))
             self.progress.setRange(0, 100)
             self.progress.setValue(0)
 
@@ -495,13 +593,13 @@ class MainWindow(QMainWindow):
                 self.append_terminal(text + '\n')
             if self.active_operation == 'info':
                 if text.startswith('Model:'):
-                    self.camera_label.setText(text.split(':', 1)[1].strip())
+                    set_text(self.camera_label, text.split(':', 1)[1].strip())
                 elif text.startswith('Firmware version:'):
-                    self.camera_label.setText(self.camera_label.text() + '\nFirmware ' + text.split(':', 1)[1].strip())
+                    set_text(self.camera_label, self.camera_label.text() + '\nFirmware ' + text.split(':', 1)[1].strip())
         elif kind == 'progress':
             self.progress.setRange(0, 100)
             self.progress.setValue(event.get('percent', 0))
-            self.status.setText('%s · %s %%' % (event.get('phase') or 'Übertragung', event.get('percent', 0)))
+            set_text(self.status, '%s · %s %%' % (event.get('phase') or 'Transfer', event.get('percent', 0)))
         elif kind == 'data':
             self.show_data(event['kind'], event['value'])
         elif kind == 'error':
@@ -512,21 +610,21 @@ class MainWindow(QMainWindow):
             self.admin_button.setVisible(self.requires_admin and selected)
             self.privacy_button.setVisible(self.requires_privacy and selected)
             self.status.setStyleSheet('color: #b33434')
-            self.status.setText(event['message'])
-            self.log.appendPlainText(event['message'] + '\n' + event.get('detail', ''))
+            set_text(self.status, event['message'])
+            self.log.appendPlainText(tr(event['message']) + '\n' + event.get('detail', ''))
             if self.active_operation == 'info':
-                self.camera_label.setText('Kamera nicht erreichbar')
+                set_text(self.camera_label, 'Camera unavailable')
         elif kind == 'done':
             self.progress.setRange(0, 100)
             self.progress.setValue(100 if event['success'] else 0)
             if event['success']:
                 self.status.setStyleSheet('color: #26704c')
-                message = 'Aktion erfolgreich abgeschlossen.'
+                message = 'Action completed successfully.'
                 if self.active_operation in ('install', 'install_catalog'):
-                    message = 'Installation bestätigt. Das USB-Kabel kann jetzt entfernt werden.'
+                    message = 'Installation confirmed. You can now disconnect the USB cable.'
                 elif self.active_operation in ('updatershell', 'serviceshell'):
-                    message = 'Sitzung beendet und Kameraverbindung geschlossen.'
-                self.status.setText(message)
+                    message = 'Session ended and camera connection closed.'
+                set_text(self.status, message)
         elif kind == 'session_ready':
             self.session_ready = True
             self.session_commands = event['commands']
@@ -536,7 +634,7 @@ class MainWindow(QMainWindow):
             self.session_tabs.setCurrentIndex(0)
             self.progress.setRange(0, 100)
             self.progress.setValue(0)
-            self.status.setText('Sitzung verbunden. Aktion auswählen oder PMCA-Befehl eingeben.')
+            set_text(self.status, 'Session connected. Select an action or enter a PMCA command.')
             self.update_session_controls()
         elif kind == 'tweaks':
             self.set_tweaks(event['items'])
@@ -544,7 +642,7 @@ class MainWindow(QMainWindow):
             self.action_busy = False
             self.progress.setRange(0, 100)
             self.progress.setValue(100 if event['success'] else 0)
-            self.status.setText('Sitzungsaktion abgeschlossen.' if event['success'] else event.get('message', 'Sitzungsaktion fehlgeschlagen.'))
+            set_text(self.status, 'Session action completed.' if event['success'] else event.get('message', 'Session action failed.'))
             self.status.setStyleSheet('color: #26704c' if event['success'] else 'color: #b33434')
             if not event['success']:
                 self.append_terminal(event.get('message', '') + '\n')
@@ -552,7 +650,7 @@ class MainWindow(QMainWindow):
         elif kind == 'terminal_ready':
             self.terminal_active = True
             self.terminal_stop_sent = False
-            self.status.setText('Linux-Shell verbunden. Befehle eingeben oder Strg+C senden.')
+            set_text(self.status, 'Linux shell connected. Enter commands or send Ctrl+C.')
             self.update_session_controls()
         elif kind == 'terminal':
             self.append_terminal(event['text'])
@@ -562,25 +660,26 @@ class MainWindow(QMainWindow):
             self.terminal_active = False
             self.update_session_controls()
         elif kind == 'prompt':
-            text, accepted = QInputDialog.getText(self, 'Kamera-Sitzung', event.get('text', 'Eingabe'))
+            text, accepted = QInputDialog.getText(self, tr('Camera session'), tr(event.get('text', 'Input')))
             self.controller.send(dict(action='prompt_response', text=text, cancelled=not accepted))
 
     def show_data(self, kind, value):
+        self.last_result = (kind, value)
         self.results.clear()
         self.results.setProperty('result_kind', kind)
         if kind == 'apps':
-            headers = ['App', 'Paket', 'Autor', 'Beschreibung']
+            headers = ['App', 'Package', 'Author', 'Description']
             self.packages = [item['package'] for item in value]
             rows = [([item['name'], item['package'], item['author'], item['description']], item) for item in value]
         elif kind == 'market':
-            headers = ['App', 'Kamera', 'Geräte-ID', 'App-ID']
+            headers = ['App', 'Camera', 'Device ID', 'App ID']
             rows = [([item['name'], item['model'], str(item['device']), str(item['app'])], item) for item in value]
         else:
-            headers = ['Eigenschaft', 'Wert']
-            names = {'package': 'Paket', 'version': 'Version', 'version_code': 'Versionscode', 'min_sdk': 'Android-Mindestversion (SDK)', 'signed': 'Signatur vorhanden', 'compatible_sdk': 'Mindestversion passt zur Kamera'}
-            rows = [([names.get(key, key), json.dumps(item, ensure_ascii=False) if not isinstance(item, str) else item], {}) for key, item in value.items()]
+            headers = ['Property', 'Value']
+            names = {'package': 'Package', 'version': 'Version', 'version_code': 'Version code', 'min_sdk': 'Minimum Android version (SDK)', 'signed': 'Signature present', 'compatible_sdk': 'Minimum version compatible with camera'}
+            rows = [([tr(names.get(key, key)), json.dumps(item, ensure_ascii=False) if not isinstance(item, str) else item], {}) for key, item in value.items()]
         self.results.setColumnCount(len(headers))
-        self.results.setHeaderLabels(headers)
+        self.results.setHeaderLabels([tr(header) for header in headers])
         for texts, data in rows:
             item = QTreeWidgetItem([str(text or '') for text in texts])
             item.setData(0, Qt.ItemDataRole.UserRole, data)
@@ -588,11 +687,11 @@ class MainWindow(QMainWindow):
         for index in range(len(headers) - 1):
             self.results.resizeColumnToContents(index)
         if not rows:
-            self.results.addTopLevelItem(QTreeWidgetItem(['Keine Einträge verfügbar.']))
+            self.results.addTopLevelItem(QTreeWidgetItem([tr('No entries available.')]))
         self.results.show()
-        self.results.setToolTip('Doppelklick: App auswählen' if kind in ('apps', 'market') else '')
+        set_text(self.results, 'Double-click to select an app' if kind in ('apps', 'market') else '', 'setToolTip')
         if kind == 'apk' and (not value['compatible_sdk'] or not value['signed']):
-            self.log.appendPlainText('APK-Prüfung: Mindestversion oder Signatur passt möglicherweise nicht zur Kamera.')
+            self.log.appendPlainText(tr('APK check: the minimum Android version or signature may be incompatible with the camera.'))
 
     def use_result(self, item, column):
         if self.controller.busy:
@@ -614,12 +713,15 @@ class MainWindow(QMainWindow):
                 child.widget().deleteLater()
         self.tweak_boxes = {}
         for item in items:
-            box = QCheckBox(item['description'] + ' · ' + item['value'])
+            box = QCheckBox()
+            box.setProperty('tweak_description', item['description'])
+            box.setProperty('tweak_value', item['value'])
+            box.setText(tr(item['description']) + ' · ' + item['value'])
             box.setChecked(item['enabled'])
             self.tweak_boxes[item['id']] = box
             self.tweak_form_layout.addWidget(box)
         if not items:
-            self.tweak_form_layout.addWidget(label('Für diese Kamera sind keine Tweaks verfügbar.', 'muted'))
+            self.tweak_form_layout.addWidget(label('No tweaks are available for this camera.', 'muted'))
         self.update_session_controls()
 
     def update_session_controls(self):
@@ -645,7 +747,7 @@ class MainWindow(QMainWindow):
             return
         self.action_busy = True
         self.status.setStyleSheet('color: #263b59')
-        self.status.setText('Sitzungsaktion läuft …')
+        set_text(self.status, 'Session action in progress…')
         self.progress.setRange(0, 0)
         self.update_session_controls()
         self.controller.send(message)
@@ -687,13 +789,13 @@ class MainWindow(QMainWindow):
         try:
             validate(self.shell_form.operation, values)
             if values.get('directory') and not Path(values['directory']).is_dir():
-                raise ValueError('Zielverzeichnis nicht gefunden.')
+                raise ValueError('Destination directory not found.')
             if values.get('id'):
                 int(values['id'], 16)
             if values.get('data'):
                 bytes(int(part, 16) for part in values['data'].split())
         except (ValueError, TypeError) as error:
-            QMessageBox.information(self, 'Eingabe prüfen', str(error))
+            QMessageBox.information(self, tr('Check input'), tr(str(error)))
             return
         def quote(value):
             return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
@@ -712,26 +814,26 @@ class MainWindow(QMainWindow):
         self.session_action(dict(action='command', command=command))
 
     def export_log(self):
-        path, _ = QFileDialog.getSaveFileName(self, 'Protokoll exportieren', 'pmca-log.txt', 'Textdateien (*.txt)')
+        path, _ = QFileDialog.getSaveFileName(self, tr('Export log'), 'pmca-log.txt', tr('Text files (*.txt)'))
         if path:
             try:
                 Path(path).write_text(self.log.toPlainText(), encoding='utf-8')
             except OSError as error:
-                QMessageBox.information(self, 'Export fehlgeschlagen', str(error))
+                QMessageBox.information(self, tr('Export failed'), str(error))
 
     def about(self):
-        QMessageBox.about(self, 'ILCE Toolkit', 'Neue Desktop-Oberfläche für Sony PMCA-RE.\n\n'
-            'Primäre Plattform: macOS mit Apple Silicon.\nLaufzeit: Python %s · %s\n\n'
-            'Kameraabhängige Funktionen benötigen die Unterstützung des jeweiligen Modells.'
-            % (platform.python_version(), platform.machine()))
+        QMessageBox.about(self, 'ILCE Toolkit', tr('Desktop interface for Sony PMCA-RE.\n\nFor Sony cameras compatible with PMCA-RE. Available features depend on the model, firmware and USB mode.\n\nPrimary platform: macOS on Apple Silicon.\nRuntime: Python %s · %s', platform.python_version(), platform.machine()))
 
     def closeEvent(self, event):
         if self.controller.busy:
             event.ignore()
-            QMessageBox.information(self, 'Aktion läuft', 'Die Kamera wird noch verwendet. Eine Shell-Sitzung zuerst über „Sitzung beenden“ schließen; bei anderen Aktionen den Abschluss abwarten.')
+            QMessageBox.information(self, tr('Action in progress'), tr('The camera is still in use. Close a shell session using End session, or wait for the current action to finish.'))
             return
         self.market_token = ''
         self.settings.setValue('geometry', self.saveGeometry())
+        if self.qt_translator is not None:
+            QApplication.instance().removeTranslator(self.qt_translator)
+            self.qt_translator = None
         event.accept()
 
 

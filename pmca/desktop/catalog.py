@@ -1,5 +1,6 @@
 """Declarative forms shared by the desktop interface and worker validation."""
 from dataclasses import dataclass
+from .i18n import tr
 
 
 @dataclass(frozen=True)
@@ -32,45 +33,45 @@ def output_field(key, label, required=True, hint=''):
 
 
 OPERATIONS = (
-    Operation('info', 'Kamera', 'Kamera erkennen', 'Modell, Firmware, Seriennummer, Objektiv und GPS-Informationen auslesen.', camera=True),
-    Operation('diagnostics', 'Kamera', 'System prüfen', 'Python, Prozessorarchitektur und USB-Bibliothek prüfen, ohne auf die Kamera zuzugreifen.'),
-    Operation('install', 'Apps', 'APK installieren', 'Eine lokale Android-App über den USB-App-Installer auf die Kamera übertragen.', (
-        file_field('apk', 'APK-Datei'), output_field('output', 'Installationsbericht (JSON)', False)), True),
-    Operation('apk_inspect', 'Apps', 'APK prüfen', 'Paket, Version, Android-Mindestversion und Signatur vor der Installation prüfen.', (file_field('apk', 'APK-Datei'),)),
-    Operation('apps', 'Apps', 'App-Katalog laden', 'Den OpenMemories-App-Katalog laden. Eine App auswählen und anschließend installieren.'),
-    Operation('install_catalog', 'Apps', 'App aus Katalog installieren', 'Eine App über ihren Paketnamen aus dem OpenMemories-Katalog installieren.', (
-        Field('package', 'Paketname', 'package', True, 'z. B. com.github.ma1co.openmemories.tweak'),
-        output_field('output', 'Installationsbericht (JSON)', False)), True),
-    Operation('install_test', 'Apps', 'App-Installer testen', 'Die Kommunikation mit dem App-Installer testen und Geräteinformationen lesen.', (
-        output_field('output', 'Gerätebericht (JSON)', False),), True),
-    Operation('market', 'Apps', 'Sony-Store abfragen', 'Geräte und kostenlose Apps mit einem Sony-Authentifizierungstoken abfragen. Die Verfügbarkeit hängt vom Sony-Dienst ab.', (
-        Field('token', 'Sony-Token', 'password', True),)),
-    Operation('market_download', 'Apps', 'Sony-App herunterladen', 'Eine App anhand der Geräte- und App-ID als APK herunterladen.', (
-        Field('token', 'Sony-Token', 'password', True), Field('device', 'Geräte-ID', required=True),
-        Field('app', 'App-ID', required=True), output_field('output', 'APK speichern')),),
-    Operation('updatershell', 'Shell & Tweaks', 'Updater-Sitzung starten', 'Updater-Shell öffnen: Tweaks, Linux-Shell, Dateien, Bootloader, Boot-ROM und Backup-Einstellungen. Den Anweisungen auf der Kamera folgen.', (
-        Field('model', 'Modell (optional)', hint='Automatisch erkennen oder z. B. ILCE-5000'),
-        file_field('firmware', 'Custom-Firmware (optional)', False)), True, True),
-    Operation('serviceshell', 'Shell & Tweaks', 'Service-Sitzung starten', 'Vorbereitung: USB-Kabel abziehen. An der Kamera MENU → Einstellung → USB-Verbindung → Massenspeich. wählen, dann USB neu verbinden. USB-Treiber: Automatisch oder libusb. Belegt macOS das Interface, erscheint ein Button für die Administratorfreigabe. Der Service-Start funktioniert nicht im MTP-Modus.', camera=True, session=True),
-    Operation('firmware', 'Firmware', 'Firmware installieren', 'Eine Sony-Firmwaredatei auf die angeschlossene Kamera übertragen. Den Anweisungen auf der Kamera folgen.', (
-        file_field('firmware', 'Firmwaredatei (.dat)'),), True),
-    Operation('guess_firmware', 'Firmware', 'Passende Firmware finden', 'Firmwareabbilder aus einem ZIP mit der Kamera auf Modellkompatibilität prüfen.', (
-        file_field('archive', 'Firmwarearchiv (.zip)'),), True),
-    Operation('gps', 'GPS', 'GPS-Hilfsdaten aktualisieren', 'GPS-Hilfsdaten aus einer lokalen Datei schreiben oder automatisch von Sony herunterladen.', (
-        file_field('gps', 'GPS-Datei (optional)', False),), True),
-    Operation('wifi_read', 'WLAN & Streaming', 'WLAN auslesen', 'Gespeicherte WLAN-Einstellungen anzeigen oder als JSON exportieren.', (
-        Field('multi', 'Multi-WLAN', 'check'), output_field('output', 'JSON exportieren (optional)', False)), True),
-    Operation('wifi_write', 'WLAN & Streaming', 'WLAN schreiben', 'WLAN-Einstellungen aus einer zuvor exportierten JSON-Datei übernehmen.', (
-        file_field('settings', 'WLAN-Einstellungen (.json)'), Field('multi', 'Multi-WLAN', 'check')), True),
-    Operation('stream_read', 'WLAN & Streaming', 'Streaming auslesen', 'Streaming- und Social-Media-Einstellungen anzeigen oder als JSON exportieren.', (
-        output_field('output', 'JSON exportieren (optional)', False),), True),
-    Operation('stream_write', 'WLAN & Streaming', 'Streaming schreiben', 'Streaming- und Social-Media-Einstellungen aus einer JSON-Datei übernehmen.', (
-        file_field('settings', 'Streaming-Einstellungen (.json)'),), True),
-    Operation('apk2spk', 'Dateiwerkzeuge', 'APK → SPK', 'Eine APK in das Sony-App-Paketformat umwandeln.', (
-        file_field('input', 'APK-Datei'), output_field('output', 'SPK speichern'))),
-    Operation('spk2apk', 'Dateiwerkzeuge', 'SPK → APK', 'Eine APK aus einem Sony-App-Paket extrahieren.', (
-        file_field('input', 'SPK-Datei'), output_field('output', 'APK speichern'))),
-    Operation('print_backup', 'Dateiwerkzeuge', 'Backup.bin analysieren', 'Alle Backup-Eigenschaften mit ID, Attributen, Daten und Rücksetzwerten anzeigen.', (
+    Operation('info', 'Camera', 'Detect camera', 'Read model, firmware, serial number, lens and GPS information.', camera=True),
+    Operation('diagnostics', 'Camera', 'Check system', 'Check Python, processor architecture and the USB library without accessing a camera.'),
+    Operation('install', 'Apps', 'Install APK', 'Transfer a local Android app to the camera through the USB app installer.', (
+        file_field('apk', 'APK file'), output_field('output', 'Installation report (JSON)', False)), True),
+    Operation('apk_inspect', 'Apps', 'Inspect APK', 'Check package, version, minimum Android version and signature before installation.', (file_field('apk', 'APK file'),)),
+    Operation('apps', 'Apps', 'Load app catalog', 'Load the OpenMemories app catalog. Select an app to install.'),
+    Operation('install_catalog', 'Apps', 'Install app from catalog', 'Install an app from the OpenMemories catalog using its package name.', (
+        Field('package', 'Package name', 'package', True, 'e.g. com.github.ma1co.openmemories.tweak'),
+        output_field('output', 'Installation report (JSON)', False)), True),
+    Operation('install_test', 'Apps', 'Test app installer', 'Test communication with the app installer and read device information.', (
+        output_field('output', 'Device report (JSON)', False),), True),
+    Operation('market', 'Apps', 'Query Sony store', 'Query devices and free apps using a Sony authentication token. Availability depends on the Sony service.', (
+        Field('token', 'Sony token', 'password', True),)),
+    Operation('market_download', 'Apps', 'Download Sony app', 'Download an APK using its device and app IDs.', (
+        Field('token', 'Sony token', 'password', True), Field('device', 'Device ID', required=True),
+        Field('app', 'App ID', required=True), output_field('output', 'Save APK')),),
+    Operation('updatershell', 'Shell & Tweaks', 'Start updater session', 'Open an updater shell for tweaks, Linux shell, files, bootloader, boot ROM and backup settings. Follow the instructions on the camera. Support depends on the camera model.', (
+        Field('model', 'Model (optional)', hint='Detect automatically or enter your Sony model'),
+        file_field('firmware', 'Custom firmware (optional)', False)), True, True),
+    Operation('serviceshell', 'Shell & Tweaks', 'Start service session', "Disconnect USB, select Mass Storage in the camera's USB Connection settings, then reconnect USB. Select Automatic or libusb. If macOS owns the interface, use the administrator access button. Service mode requires a supported camera and cannot start in MTP mode.", camera=True, session=True),
+    Operation('firmware', 'Firmware', 'Install firmware', 'Transfer a Sony firmware file to the connected camera. Follow the instructions on the camera.', (
+        file_field('firmware', 'Firmware file (.dat)'),), True),
+    Operation('guess_firmware', 'Firmware', 'Find compatible firmware', 'Check firmware images in a ZIP archive for compatibility with the camera model.', (
+        file_field('archive', 'Firmware archive (.zip)'),), True),
+    Operation('gps', 'GPS', 'Update GPS assist data', 'Write GPS assist data from a local file or download it automatically from Sony.', (
+        file_field('gps', 'GPS file (optional)', False),), True),
+    Operation('wifi_read', 'Wi-Fi & Streaming', 'Read Wi-Fi settings', 'Display saved Wi-Fi settings or export them as JSON. Requires support from the camera.', (
+        Field('multi', 'Multi Wi-Fi', 'check'), output_field('output', 'Export JSON (optional)', False)), True),
+    Operation('wifi_write', 'Wi-Fi & Streaming', 'Write Wi-Fi settings', 'Import Wi-Fi settings from a previously exported JSON file. Requires support from the camera.', (
+        file_field('settings', 'Wi-Fi settings (.json)'), Field('multi', 'Multi Wi-Fi', 'check')), True),
+    Operation('stream_read', 'Wi-Fi & Streaming', 'Read streaming settings', 'Display streaming and social media settings or export them as JSON. Requires support from the camera.', (
+        output_field('output', 'Export JSON (optional)', False),), True),
+    Operation('stream_write', 'Wi-Fi & Streaming', 'Write streaming settings', 'Import streaming and social media settings from a JSON file. Requires support from the camera.', (
+        file_field('settings', 'Streaming settings (.json)'),), True),
+    Operation('apk2spk', 'File Tools', 'APK → SPK', 'Convert an APK to the Sony app package format.', (
+        file_field('input', 'APK file'), output_field('output', 'Save SPK'))),
+    Operation('spk2apk', 'File Tools', 'SPK → APK', 'Extract an APK from a Sony app package.', (
+        file_field('input', 'SPK file'), output_field('output', 'Save APK'))),
+    Operation('print_backup', 'File Tools', 'Inspect Backup.bin', 'Display backup properties with their IDs, attributes, data and reset values.', (
         file_field('input', 'Backup.bin'),)),
 )
 
@@ -84,13 +85,13 @@ def validate(operation, values):
     for field in operation.fields:
         value = values.get(field.key, '')
         if field.required and not value:
-            raise ValueError('%s fehlt.' % field.label)
+            raise ValueError(tr('%s is required.', tr(field.label)))
         if value and field.kind == 'file' and not Path(value).is_file():
-            raise ValueError('%s: Datei nicht gefunden.' % field.label)
+            raise ValueError(tr('%s: file not found.', tr(field.label)))
         if value and field.kind == 'output':
             path = Path(value)
             if not path.parent.is_dir() or path.is_dir():
-                raise ValueError('%s: Ungültiger Zielpfad.' % field.label)
+                raise ValueError(tr('%s: invalid destination path.', tr(field.label)))
             for source in operation.fields:
                 if source.kind == 'file' and values.get(source.key) and path.resolve() == Path(values[source.key]).resolve():
-                    raise ValueError('Eingabe- und Ausgabedatei müssen verschieden sein.')
+                    raise ValueError(tr('Input and output files must be different.'))

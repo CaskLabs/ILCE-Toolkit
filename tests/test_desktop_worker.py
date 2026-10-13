@@ -6,9 +6,13 @@ import unittest
 from unittest.mock import patch
 
 from pmca.desktop import worker
+from pmca.desktop.i18n import get_language, german_translations, set_language
 
 
 class WorkerTests(unittest.TestCase):
+    def setUp(self):
+        set_language('en')
+
     def invoke(self, request, dispatch=None):
         output = io.StringIO()
         with patch('sys.stdin', io.StringIO(json.dumps(request) + '\n')), patch('sys.stdout', output):
@@ -19,11 +23,33 @@ class WorkerTests(unittest.TestCase):
                 code = worker.run()
         return code, [json.loads(line) for line in output.getvalue().splitlines()]
 
+    def test_worker_uses_requested_language_and_restores_parent_context(self):
+        message = 'The camera does not support this command for its model or current USB mode.'
+
+        def unsupported(request, protocol, files):
+            from pmca.usb import InvalidCommandException
+            raise InvalidCommandException('Unsupported command')
+
+        for language in ('en', 'de'):
+            with self.subTest(language=language):
+                code, events = self.invoke(dict(operation='wifi_read', language=language), unsupported)
+                self.assertEqual(code, 1)
+                error = next(event for event in events if event['event'] == 'error')
+                self.assertEqual(error['message'], german_translations()[message] if language == 'de' else message)
+                self.assertFalse(error['requires_admin'])
+                self.assertEqual(get_language(), 'en')
+
+    def test_validation_errors_translate_field_labels_in_german(self):
+        code, events = self.invoke(dict(operation='install', language='de'))
+        self.assertEqual(code, 1)
+        error = next(event for event in events if event['event'] == 'error')
+        self.assertEqual(error['message'], german_translations()['%s is required.'] % german_translations()['APK file'])
+
     def test_real_spk_round_trip_with_spaces_and_unicode(self):
         with tempfile.TemporaryDirectory() as directory:
-            source = Path(directory) / 'Meine App ä.apk'
+            source = Path(directory) / 'My app \u00e4.apk'
             packed = Path(directory) / 'Meine App.spk'
-            restored = Path(directory) / 'Meine App zurück.apk'
+            restored = Path(directory) / 'My restored app \u00e4.apk'
             source.write_bytes(b'APK test payload\x00\xff' * 9000)
             for operation, input_path, output_path in [('apk2spk', source, packed), ('spk2apk', packed, restored)]:
                 code, events = self.invoke(dict(operation=operation, values=dict(input=str(input_path), output=str(output_path))))
@@ -71,7 +97,7 @@ class WorkerTests(unittest.TestCase):
         with patch.object(usb, 'installCommand'), patch.object(usb, 'getDevice'), patch.object(usb, 'installApp'), patch.object(usb, 'printStatus'):
             code, events = self.invoke(dict(operation='install_test', values={}))
         self.assertEqual(code, 1)
-        self.assertIn('nicht bestätigt', next(event['message'] for event in events if event['event'] == 'error'))
+        self.assertIn('did not confirm', next(event['message'] for event in events if event['event'] == 'error'))
 
     def test_install_confirmation_is_a_structured_result(self):
         from pmca.commands import usb
@@ -108,7 +134,7 @@ class WorkerTests(unittest.TestCase):
             code, events = self.invoke(dict(operation='serviceshell', values={}))
         self.assertEqual(code, 1)
         message = next(event['message'] for event in events if event['event'] == 'error')
-        self.assertIn('USB-Verbindung → Massenspeich.', message)
+        self.assertIn('USB Connection settings', message)
 
     def test_service_session_requires_libusb_driver(self):
         from pmca.commands import usb
@@ -139,8 +165,8 @@ class WorkerTests(unittest.TestCase):
                 self.assertEqual(code, 1)
                 error = next(event for event in events if event['event'] == 'error')
                 self.assertTrue(error['requires_admin'])
-                self.assertIn('Administratorfreigabe', error['message'])
-                self.assertNotIn('Service-Sitzung', error['message'])
+                self.assertIn('Administrator access', error['message'])
+                self.assertNotIn('service session', error['message'])
 
     def test_connected_helper_rejects_other_operations_before_dispatch(self):
         output = io.StringIO()
@@ -180,7 +206,7 @@ class WorkerTests(unittest.TestCase):
         error = next(event for event in events if event['event'] == 'error')
         self.assertTrue(error['requires_full_disk_access'])
         self.assertFalse(error['requires_admin'])
-        self.assertIn('Festplattenvollzugriff', error['message'])
+        self.assertIn('Full Disk Access', error['message'])
 
     def test_stream_progress_accepts_split_print_writes(self):
         output = io.StringIO()
@@ -203,7 +229,7 @@ class WorkerTests(unittest.TestCase):
             code = worker.run()
         self.assertEqual(code, 1)
         self.assertFalse(applied)
-        self.assertIn('Eingabe abgebrochen', output.getvalue())
+        self.assertIn('Input canceled', output.getvalue())
 
     def test_unsupported_camera_command_is_not_a_permission_error(self):
         from pmca.usb import InvalidCommandException
@@ -214,7 +240,7 @@ class WorkerTests(unittest.TestCase):
         code, events = self.invoke(dict(operation='wifi_read'), unsupported)
         self.assertEqual(code, 1)
         message = next(event['message'] for event in events if event['event'] == 'error')
-        self.assertIn('aktuellen USB-Modus', message)
+        self.assertIn('current USB mode', message)
         self.assertNotIn('verweigert', message)
 
     def test_session_failure_is_recoverable_and_backend_stops(self):
