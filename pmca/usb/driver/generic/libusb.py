@@ -65,6 +65,8 @@ class UsbBackend(BaseUsbBackend):
   return self.dev.get_active_configuration()[(0, 0)]
 
  def reset(self):
+  # Release our own claim before checking for a kernel driver on macOS.
+  usb.util.release_interface(self.dev, 0)
   try:
    if self.dev.is_kernel_driver_active(0):
     self.dev.detach_kernel_driver(0)
