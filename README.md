@@ -1,5 +1,9 @@
-# Reverse Engineering Sony Digital Cameras
-This tool interfaces with Sony digital cameras through USB. It allows to tweak settings, dump firmware, and in some cases install custom Android apps.
+# ILCE Toolkit
+
+A desktop toolkit for Sony cameras, based on
+[Sony-PMCA-RE](https://github.com/ma1co/Sony-PMCA-RE). It communicates over USB to
+tweak settings, inspect cameras, dump firmware and, on supported models, install
+custom Android apps. The original command-line tools remain available.
 
 ## Installation
 There are two binaries:
@@ -19,6 +23,27 @@ ILCE Toolkit supports Sony cameras compatible with PMCA-RE, including supported
 ILCE and DSC models. Available functions depend on the camera model, firmware
 and USB mode. The interface replaces the previous Tkinter GUI; its primary target
 is macOS 14 or newer on Apple Silicon (M1 and later).
+
+Install the released app with Homebrew:
+
+```bash
+brew tap CaskLabs/tap https://github.com/CaskLabs/tap
+brew install --cask ilce-toolkit
+```
+
+Alternatively, download the macOS arm64 ZIP from the
+[latest release](https://github.com/CaskLabs/ILCE-Toolkit/releases/latest), unzip
+it and move **ILCE Toolkit.app** to **Applications**. Releases include a
+`SHA256SUMS` file for verifying the ZIP download.
+
+The app is **ad hoc signed**, without an Apple Developer ID or notarization.
+No paid Apple developer account is needed to build or distribute it. macOS can
+block the first launch: after trying to open the app, use **System Settings →
+Privacy & Security → Open Anyway** and confirm the exception for ILCE Toolkit.
+See [Apple's instructions](https://support.apple.com/guide/mac-help/mh40617/mac).
+Homebrew installation retains this macOS security check.
+
+Update an installed release with `brew upgrade --cask ilce-toolkit`.
 
 English is the default interface language. Open **ILCE Toolkit → Settings**
 (**⌘,** on macOS) to select English or German. Language changes apply immediately
@@ -46,8 +71,10 @@ open "dist/ILCE Toolkit.app"
 
 The app bundles Python, Qt, libusb, the local installation certificate and the
 updater payloads. No Python installation or Homebrew is needed on the target
-Mac. Local builds are ad-hoc signed; public distribution requires Developer ID
-signing and notarization. The existing CLI remains available.
+Mac. Both local builds and release builds use free ad hoc signing. Developer ID
+signing and notarization are required for Apple to verify the publisher and allow
+a downloaded app under the default Gatekeeper policy; they are not provided by
+these releases. The existing CLI remains available.
 
 | Area | Functions |
 | --- | --- |
@@ -106,7 +133,9 @@ python tools/check_bundle.py  # after building: verify the frozen worker and lib
 ```
 
 The GitHub Actions desktop workflow builds and tests on an Apple Silicon macOS
-runner and uploads an app ZIP as a build artifact. It does not publish releases.
+runner. Version tags also publish a GitHub release with the tested app ZIP and
+SHA-256 checksum. See [the release guide](docs/Releasing.md) for versioning and
+updating the Homebrew cask in `CaskLabs/tap`.
 
 #### Original binaries
 
