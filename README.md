@@ -1,143 +1,172 @@
 # ILCE Toolkit
 
-A desktop toolkit for Sony cameras, based on
-[Sony-PMCA-RE](https://github.com/ma1co/Sony-PMCA-RE). It communicates over USB to
-tweak settings, inspect cameras, dump firmware and, on supported models, install
-custom Android apps. The original command-line tools remain available.
+A desktop toolkit for Sony cameras, maintained by CaskLabs and based on
+[Sony-PMCA-RE](https://github.com/ma1co/Sony-PMCA-RE). Inspect cameras, install
+Android apps on supported models, open service or updater sessions, apply
+camera tweaks, and work with firmware, settings and local package files.
+
+The released app runs on **Apple Silicon (M1 or newer) with macOS 14 or newer**.
+It uses a Qt interface with **English and German** translations. Camera support
+and available operations depend on the model, firmware, USB mode and backend.
+
+[Installation](#installation) · [Usage](#usage) ·
+[macOS USB permissions](#macos-usb-permissions) · [Development](#development) ·
+[Command-line tools](#command-line-tools)
 
 ## Installation
-There are two binaries:
 
-* **pmca-console**: The main command line application
-* **pmca-gui**: ILCE Toolkit, a macOS-first desktop interface for the complete command set
-
-### Windows
-The application should work fine on Windows using the operating system's mass storage and MTP USB drivers.
-
-Download the [latest stable release](https://github.com/ma1co/Sony-PMCA-RE/releases/latest) or the newest [development build](https://ci.appveyor.com/project/ma1co/sony-pmca-re/build/artifacts).
-
-### macOS
-#### ILCE Toolkit (Apple Silicon)
-
-ILCE Toolkit supports Sony cameras compatible with PMCA-RE, including supported
-ILCE and DSC models. Available functions depend on the camera model, firmware
-and USB mode. The interface replaces the previous Tkinter GUI; its primary target
-is macOS 14 or newer on Apple Silicon (M1 and later).
-
-Install the released app with Homebrew:
+### Homebrew
 
 ```bash
 brew tap CaskLabs/tap https://github.com/CaskLabs/tap
 brew install --cask ilce-toolkit
 ```
 
-Alternatively, download the macOS arm64 ZIP from the
-[latest release](https://github.com/CaskLabs/ILCE-Toolkit/releases/latest), unzip
-it and move **ILCE Toolkit.app** to **Applications**. Releases include a
-`SHA256SUMS` file for verifying the ZIP download.
+Update with `brew upgrade --cask ilce-toolkit`.
+The cask is maintained in [CaskLabs/tap](https://github.com/CaskLabs/tap).
 
-The app is **ad hoc signed**, without an Apple Developer ID or notarization.
-No paid Apple developer account is needed to build or distribute it. macOS can
-block the first launch: after trying to open the app, use **System Settings →
-Privacy & Security → Open Anyway** and confirm the exception for ILCE Toolkit.
-See [Apple's instructions](https://support.apple.com/guide/mac-help/mh40617/mac).
+### Download the app
+
+1. Download the macOS arm64 ZIP from the
+   [latest ILCE Toolkit release](https://github.com/CaskLabs/ILCE-Toolkit/releases/latest).
+2. Unzip it and move **ILCE Toolkit.app** to **Applications**.
+3. Open the app.
+
+The app bundles Python, Qt, libusb, the APK installer's local TLS certificate and
+updater payloads. It does not need a separate Python or libusb installation.
+
+Releases include `SHA256SUMS`. To verify a downloaded ZIP, put both files in the
+same directory and run:
+
+```bash
+shasum -a 256 -c SHA256SUMS
+```
+
+### First launch on macOS
+
+The app is **ad hoc signed**, without Apple Developer ID signing or notarization.
+No paid Apple developer account is needed to build or distribute these releases.
+
+If macOS blocks the first launch, attempt to open the app, then choose
+**System Settings → Privacy & Security → Open Anyway** and confirm the exception
+for ILCE Toolkit. See [Apple's instructions](https://support.apple.com/guide/mac-help/mh40617/mac).
 Homebrew installation retains this macOS security check.
 
-Update an installed release with `brew upgrade --cask ilce-toolkit`.
+## Usage
 
-English is the default interface language. Open **ILCE Toolkit → Settings**
-(**⌘,** on macOS) to select English or German. Language changes apply immediately
-and are saved for the next launch. Forms and active camera sessions are preserved.
-Source strings, identifiers, comments and documentation use English. German UI
-translations live in `pmca/desktop/locales/de.json`. Worker messages follow the
-selected language; raw PMCA protocol logs and camera data retain their original text.
+The names below match the English interface. Switch to German in
+**ILCE Toolkit → Settings** (**⌘,** on macOS). The selection takes effect
+immediately and is saved for the next launch. Existing forms and sessions are
+preserved; raw camera data and backend logs retain their original text.
 
-Run from this checkout:
+### Getting started
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-brew install libusb
-python -m pip install -r requirements-gui.txt
-python pmca-gui.py
-```
+1. Connect one Sony camera over USB.
+2. Leave **USB driver** set to **Automatic**, unless an action requires libusb.
+3. Select a section in the sidebar, then an action from its dropdown.
+4. Fill in the required fields and click the action button.
 
-Build a standalone arm64 app on an Apple Silicon Mac:
+Start with **Camera → Detect camera** to read model, firmware, serial number,
+lens and GPS information where available. **Camera → Check system** checks the
+runtime, libusb and installer TLS AES without accessing a camera.
 
-```bash
-python tools/build_macos.py
-open "dist/ILCE Toolkit.app"
-```
+Local file fields accept drag-and-drop. Results appear above the log; use
+**Export…** in the log panel to save the log. Camera operations run one at a time.
 
-The app bundles Python, Qt, libusb, the local installation certificate and the
-updater payloads. No Python installation or Homebrew is needed on the target
-Mac. Both local builds and release builds use free ad hoc signing. Developer ID
-signing and notarization are required for Apple to verify the publisher and allow
-a downloaded app under the default Gatekeeper policy; they are not provided by
-these releases. The existing CLI remains available.
+### Installing camera apps
 
-| Area | Functions |
+USB app installation requires a camera that supports PlayMemories Camera Apps.
+**MTP mode can be used for APK installation.**
+
+| Source | Steps in **Apps** |
 | --- | --- |
-| Camera | Device, firmware, lens and GPS information; driver selection |
-| Apps | Local APK installation and inspection, OpenMemories catalog, installer connection test, Sony-store queries and downloads |
-| Shell & tweaks | Updater and service sessions, interactive Linux shell, all supported tweaks, file push/pull, bootloader and boot-ROM dumps, shell APK installation, backup read/write/patch/sync/protection |
-| Firmware | Firmware update and matching images from ZIP archives |
-| GPS | Local assist data or download from Sony |
-| Wi-Fi & streaming | Display, JSON export and import; Multi-Wi-Fi |
-| File tools | APK/SPK conversion and Backup.bin analysis |
+| Local APK | Select **Install APK**, choose the APK file and click **Install APK**. Optionally choose a JSON installation report. |
+| OpenMemories catalog | Run **Load app catalog**, double-click an entry, then click **Install app from catalog**. |
 
-##### Using the app
+Use **Inspect APK** to read the package name, version, minimum Android SDK and
+signature presence. Use **Test app installer** to check communication and read
+device information. Installation success is reported after the camera confirms
+completion.
 
-- **Choose an action** in the sidebar.
-- **Drag and drop files** into local file fields.
-- **Double-click a catalog app** to prepare installation or download.
+**Query Sony store** and **Download Sony app** accept a Sony authentication token.
+Double-clicking a store result prepares its device and app IDs for download.
+These actions depend on the availability of Sony's online services.
 
-Shell sessions keep the camera connection until you select **End session**.
-Available tools depend on the camera and backend.
+### Service and updater sessions
 
-| Shell control | Action |
+Open **Shell & Tweaks** and choose a session type:
+
+| Action | Connection and behavior |
 | --- | --- |
-| **End session** | Release the camera connection |
-| **Leave Linux shell** | Return to the PMCA session |
-| **Send Ctrl+C** | Send the interrupt character |
+| **Start service session** | Requires **Mass Storage** mode and the **Automatic** or **libusb** driver. Switches a supported camera into service mode. |
+| **Start updater session** | Accepts MTP or Mass Storage mode. Detects the model and selects a bundled updater payload; optional model and custom-firmware fields are available. Follow the camera and log prompts when it switches to updater mode. |
 
-The shell transports text; it is not a full terminal emulator. Camera operations
-run in a separate process, one at a time.
-
-##### Starting a service session
-
-On a supported Sony camera:
+To prepare a service session:
 
 1. Disconnect USB.
 2. In the camera's **USB Connection** settings, select **Mass Storage**.
 3. Reconnect USB.
-4. In ILCE Toolkit, select the **Automatic** or **libusb** driver.
-5. Start the service session.
+4. Select **Automatic** or **libusb** in ILCE Toolkit.
+5. Click **Start service session**.
 
-**MTP mode cannot start a service session.**
+**MTP mode cannot start a service session.** On macOS, blocked USB access may
+require the administrator retry described [below](#macos-usb-permissions).
 
-##### macOS USB permissions
+Once connected, the session provides three tabs:
+
+| Tab | Available tools |
+| --- | --- |
+| **Terminal** | Enter PMCA commands such as `help` or `info`, or select **Open Linux shell**. |
+| **Tweaks** | Review the settings available on this camera, change checkboxes and select **Apply changes** to write them. |
+| **Files & Backup** | Copy files, dump the bootloader or boot ROM, install an APK through the shell, and read, write, patch, sync or protect backup properties. |
+
+Tools and tweaks are enabled according to the connected backend. Supported
+settings can include recording limits, camera languages, the PAL/NTSC selector
+and the USB app installer.
+
+The session keeps the camera connection until you select **End session**.
+
+| Shell control | Action |
+| --- | --- |
+| **Open Linux shell** | Enter the camera's Linux shell when supported |
+| **Leave Linux shell** | Return to the PMCA session |
+| **Send Ctrl+C** | Send the interrupt character to the Linux shell |
+| **End session** | Close the session and release the camera connection |
+
+The terminal transports text; it is not a full terminal emulator.
+
+### Other tools
+
+| Sidebar section | Actions |
+| --- | --- |
+| **Firmware** | **Install firmware** transfers a `.dat` firmware file. **Find compatible firmware** checks images in a ZIP archive against the connected camera. Firmware installation is separate from starting an updater shell. |
+| **GPS** | **Update GPS assist data** accepts a local file or attempts a download from Sony. |
+| **Wi-Fi & Streaming** | Read settings, optionally export JSON, or write settings from an exported JSON file. Wi-Fi actions also offer **Multi Wi-Fi**. |
+| **File Tools** | Convert **APK → SPK**, extract **SPK → APK**, or **Inspect Backup.bin**. These actions work on local files without a camera. |
+
+## macOS USB permissions
 
 The macOS mass-storage driver can block access to the camera. If this happens:
 
-1. Select **Run with administrator access** when the app offers it, then approve
-   the macOS administrator dialog. This also applies to updater sessions,
-   WLAN/streaming and other actions blocked by the same driver.
+1. Select **Run with administrator access** when offered, then approve the macOS
+   administrator dialog. The retry is available for camera actions blocked by
+   the mass-storage driver, including service and updater sessions.
 2. If access is still denied, manually grant **ILCE Toolkit** access under
-   **System Settings → Privacy & Security → Full Disk Access**, then restart
-   the app. Administrator authorization does not bypass this privacy check.
+   **System Settings → Privacy & Security → Full Disk Access**, then restart the
+   app. **Open privacy settings** opens this panel when the app offers it.
 3. After a local ad hoc rebuild, you may need to remove and re-add the app in
    Full Disk Access because its code signature has changed.
 
-Normal MTP app installation and camera queries only request administrator rights
-if their USB access requires capturing the mass-storage interface.
+Administrator authorization does not bypass Full Disk Access. Normal MTP app
+installation and camera queries only request administrator rights if their USB
+access requires capturing the mass-storage interface.
 
 <details>
 <summary>Technical details: administrator access and macOS privacy</summary>
 
-Only the worker for the selected camera action is authorized. Its authenticated
-transport rejects requests for other actions and communicates with the GUI over
-an authenticated local socket.
+The interface stays under your user account. Only the worker for the selected
+camera action is authorized; its authenticated transport rejects other actions
+and communicates with the GUI over an authenticated local socket.
 
 File operations use the invoking user's effective permissions. The worker raises
 its effective uid only around USB access and driver capture/restore.
@@ -150,99 +179,108 @@ grant even when the worker runs as root. See the
 
 </details>
 
-##### Files, credentials and online services
+## Compatibility and data
 
+- **Camera support:** an ILCE or DSC model name alone does not guarantee support
+  for every action. Updater sessions need a compatible payload; app installation
+  needs PMCA support; service sessions need a compatible service-mode backend.
+- **Camera writes:** the USB protocols are reverse-engineered. Firmware, tweak
+  and backup operations can change the device. Understand the selected action
+  and keep backups before modifying firmware or backup properties.
 - **Reports and exports:** temporary files replace their targets only after the
   operation succeeds.
-- **Sony tokens:** sent to the worker over stdin; they are not stored in
-  preferences or passed on the command line.
-- **WLAN/streaming logs:** can contain credentials. Handle exported files and logs
-  accordingly.
-- **Sony online services:** may no longer be available. The GUI reports backend
-  failures.
+- **Credentials:** Sony tokens are sent to the worker over stdin and are not
+  stored in preferences or passed on the command line. Wi-Fi/streaming output
+  can contain credentials; handle exported files and logs accordingly.
+- **Online services:** catalog downloads, Sony-store queries and automatic GPS
+  downloads need network access. Backend errors appear in the app's log.
 
-##### Development checks
+Custom camera apps should target Android 2.3.7 (API 10), with a minimum SDK of
+10 or lower. **Inspect APK** checks the minimum SDK and signature presence; it
+cannot guarantee that an app will run on a particular camera.
 
-Tests (no camera writes or network access):
+## Development
+
+### Run from source
+
+CI uses Python 3.12. On macOS, install libusb, then create a virtual environment
+and install the desktop dependencies:
+
+```bash
+git clone https://github.com/CaskLabs/ILCE-Toolkit.git
+cd ILCE-Toolkit
+brew install libusb
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-gui.txt
+python pmca-gui.py
+```
+
+The source also contains Windows and Linux USB backends. This fork currently
+publishes desktop releases for macOS on Apple Silicon; it does not publish
+Windows, Linux or Intel Mac binaries. Source installations on other platforms
+need their platform's USB library and driver setup. On Windows, activate the
+virtual environment with `.venv\Scripts\Activate.ps1` in PowerShell.
+
+### Build and verify the macOS app
+
+With the virtual environment active on an Apple Silicon Mac:
+
+```bash
+python tools/build_macos.py
+python tools/check_bundle.py
+python tools/package_macos.py --version 0.1.0
+open "dist/ILCE Toolkit.app"
+```
+
+Use the version declared in `pmca-gui.spec` when packaging. Bundle verification
+checks the frozen worker, English/German translations, libusb, installer TLS
+AES, APK/SPK conversion and the ad hoc code signature.
+
+### Tests and releases
+
+Run the desktop, worker and USB lifecycle tests without camera writes or network
+access:
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests -v
-python tools/check_bundle.py  # after building: verify the frozen worker and libusb
 ```
 
-The GitHub Actions desktop workflow builds and tests on an Apple Silicon macOS
-runner. Version tags also publish a GitHub release with the tested app ZIP and
-SHA-256 checksum. See [the release guide](docs/Releasing.md) for versioning and
-updating the Homebrew cask in `CaskLabs/tap`.
+The [desktop workflow](.github/workflows/build.yml) tests and builds on an
+Apple Silicon macOS runner. Matching version tags publish the verified app ZIP
+and `SHA256SUMS` as a GitHub release. See [the release guide](docs/Releasing.md)
+for versioning and updating the Homebrew cask.
 
-#### Original binaries
+Interface strings and source documentation use English. German translations are
+in [`pmca/desktop/locales/de.json`](pmca/desktop/locales/de.json).
 
-macOS binaries are also distributed, but less tested than the Windows equivalents. Getting the USB drivers to work may require some fiddling. To communicate with cameras in mass storage mode, Sony's [Camera Driver](https://support.d-imaging.sony.co.jp/mac/driver/11/ja/) has to be installed. Make sure to close all applications which could access USB drivers, including Photos, Dropbox and Google Drive.
+## Command-line tools
 
-The latest release binaries can be found in the [release section](https://github.com/ma1co/Sony-PMCA-RE/releases/latest).
+The original PMCA CLI remains available from the source checkout. The Homebrew
+cask installs the desktop app. For CLI-only use, install `requirements.txt`
+instead of `requirements-gui.txt`, plus the USB library for your platform.
 
-### Linux
-The application uses Python 3 and should work fine on Linux using libusb drivers.
+With the virtual environment active:
 
-Clone or download this repository, then run the following commands:
 ```bash
-pip install -r requirements-gui.txt  # CLI and desktop dependencies
-./pmca-console.py  # for the command line application
-./pmca-gui.py  # for the gui application
+python pmca-console.py --help
+python pmca-console.py info
+python pmca-console.py install -f /path/to/app.apk
+python pmca-console.py install -i
+python pmca-console.py updatershell
+python pmca-console.py serviceshell
 ```
 
-## Usage
-There are three main modes of interfacing with a camera:
+Use `python pmca-console.py <command> --help` for each command's arguments. The
+macOS administrator retry and privacy-settings buttons belong to the desktop
+interface; the CLI does not offer those dialogs.
 
-### App Installer
-If the camera supports *PlayMemories Camera Apps (PMCA)*, it is possible to install custom Android apps using this tool. A list of supported cameras can be found [here](https://openmemories.readthedocs.io/devices.html).
+## Resources and credits
 
-It is recommended to install the [*OpenMemories: Tweak*](https://github.com/ma1co/OpenMemories-Tweak) app. This app allows to tweak settings and to start *telnet* and *adb* servers to execute code on the system.
+- [Sony-PMCA-RE](https://github.com/ma1co/Sony-PMCA-RE): original project and USB backends.
+- [PMCADemo](https://github.com/ma1co/PMCADemo): example camera app.
+- [OpenMemories: Framework](https://github.com/ma1co/OpenMemories-Framework): camera API framework for custom apps.
+- [App installation protocol](docs/AppInstallation.md): background on the Sony APK/SPK installer.
+- [nex-hack](http://www.personal-view.com/faqs/sony-hack/hack-development): earlier Sony camera reverse-engineering work.
 
-Other apps are available. A list can be found [here](https://github.com/ma1co/OpenMemories-AppList).
-
-There are two ways to install apps:
-* **pmca-gui**: In *Apps*, load the app catalog, double-click an app and install it, or select a local APK.
-* **pmca-console**: Run `pmca-console install -i` to interactively select an app to install.
-
-### Firmware Updater
-Sony cameras can boot from a secondary partition for firmware updates. Using a custom firmware file, we can execute code in this mode. Note that the camera firmware itself remains untouched. The firmware update process is only used to execute custom code.
-
-This mode does not require any special drivers, the operating system's mass storage USB driver is enough.
-
-A list of supported camera models can be found [here](https://openmemories.readthedocs.io/devices.html). Devices based on the CXD90045 and CXD90057 architectures are not compatible, since their firmware is cryptographically signed.
-
-There are two ways to use this:
-* **pmca-gui**: In *Shell & Tweaks*, start an updater session. The session's *Tweaks* tab provides checkboxes and an apply button.
-* **pmca-console**: Run `pmca-console updatershell`. There are commands available to dump the firmware, execute Linux commands, and to tweak settings.
-
-Note that this requires rebooting the camera to firmware update mode. You will be guided through this process.
-
-### Service Mode
-Sony cameras have a USB mode called *senser mode*, which is used during servicing for calibration and other things. It can also be used to execute code on the running system.
-
-Service mode has the best camera compatibility, but requires custom USB drivers.
-
-It is supported in the command line application and in the desktop interface's *Shell & Tweaks* section:
-* **pmca-console**: Run `pmca-console serviceshell`. There are commands available to dump the firmware and to execute Linux commands.
-
-#### Windows Drivers
-To use service mode on Windows, custom drivers have to be installed using [Zadig](http://zadig.akeo.ie/):
-* Make sure the camera is connected in mass storage mode.
-* In Zadig, check *Options -> List All Devices*, select the camera, select *libusb-win32* and click *Replace Driver*.
-* Run `pmca-console serviceshell` to make the camera switch modes.
-* Once the camera has switched, repeat the above step to install a driver for service mode.
-* You should now be able to use `pmca-console serviceshell`.
-
-To be able to use the camera normally again, the libusb drivers have to be uninstalled in device manager.
-
-## Is it safe?
-This is an experiment in a very early stage. All information has been found through reverse engineering. Even though everything worked fine for our developers, it could cause harm to your hardware. If you break your camera, you get to keep both pieces. **We won't take any responsibility.**
-
-## What about custom apps?
-It is possible to develop custom Android apps for supported cameras. Keep in mind that they should be compatible with Android 2.3.7. Debug and release certificates are accepted by the camera. See [*PMCADemo*](https://github.com/ma1co/PMCADemo) for a demo app.
-
-There are a few special Sony APIs which allow you to take advantage of the features of your camera. They can be used through [*OpenMemories: Framework*](https://github.com/ma1co/OpenMemories-Framework).
-
-## Special thanks
-Without the work done by the people at [nex-hack](http://www.personal-view.com/faqs/sony-hack/hack-development), this wouldn't have been possible. Thanks a lot!
+Licensed under the [MIT License](LICENSE.txt). Original attribution is preserved.
