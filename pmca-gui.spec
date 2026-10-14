@@ -3,6 +3,7 @@
 from ctypes.util import find_library
 from pathlib import Path
 import platform
+import subprocess
 import sys
 from PySide6.QtCore import QLibraryInfo
 
@@ -14,6 +15,13 @@ if mac and platform.machine() != 'arm64':
 binaries = []
 if mac:
     library = find_library('usb-1.0')
+    if not library or not Path(library).is_file():
+        # Python.org builds used in CI do not search Homebrew's library prefix.
+        try:
+            prefix = subprocess.check_output(['brew', '--prefix', 'libusb'], text=True).strip()
+            library = str(Path(prefix) / 'lib' / 'libusb-1.0.dylib')
+        except (OSError, subprocess.CalledProcessError):
+            library = None
     if not library or not Path(library).is_file():
         raise SystemExit('libusb not found. Run: brew install libusb')
     binaries.append((library, '.'))
