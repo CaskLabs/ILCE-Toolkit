@@ -86,44 +86,82 @@ these releases. The existing CLI remains available.
 | Wi-Fi & streaming | Display, JSON export and import; Multi-Wi-Fi |
 | File tools | APK/SPK conversion and Backup.bin analysis |
 
-Select an action in the sidebar. Local file fields also accept drag-and-drop.
-Double-click an app in catalog results to prepare installation or download.
-Shell sessions own the camera connection until **End session** is used;
-their available tools depend on the camera/backend. **Leave Linux shell**
-returns to the PMCA session; **Send Ctrl+C** sends the interrupt character.
-The protocol transports text, not a full terminal emulator.
+##### Using the app
 
-For a service session on a supported Sony camera, disconnect USB, select
-**Mass Storage** in the camera's **USB Connection** settings, reconnect USB and select the
-automatic or libusb driver in the app. MTP mode cannot start service mode.
-On macOS, the mass-storage kernel driver may own the interface. The app then
-offers **Run with administrator access** and requests authorization using
-the macOS administrator dialog. This authorization is also available for updater
-sessions, WLAN/streaming operations, and other camera actions when the same
-mass-storage driver blocks access. Only the worker for the selected camera action
-is authorized, and its authenticated transport rejects requests for other actions. It
-communicates with the GUI over an authenticated local socket, performs file
-operations with the invoking user's effective permissions, and temporarily
-raises its effective uid only around USB access and driver capture/restore. The
-normal MTP app installer and camera queries do not request administrator rights
-unless their USB access requires mass-storage driver capture.
-The authorized worker creates an audit session attributed to the invoking user
-before loading libusb. AppleScript's default administrator session has no audit
+- **Choose an action** in the sidebar.
+- **Drag and drop files** into local file fields.
+- **Double-click a catalog app** to prepare installation or download.
+
+Shell sessions keep the camera connection until you select **End session**.
+Available tools depend on the camera and backend.
+
+| Shell control | Action |
+| --- | --- |
+| **End session** | Release the camera connection |
+| **Leave Linux shell** | Return to the PMCA session |
+| **Send Ctrl+C** | Send the interrupt character |
+
+The shell transports text; it is not a full terminal emulator. Camera operations
+run in a separate process, one at a time.
+
+##### Starting a service session
+
+On a supported Sony camera:
+
+1. Disconnect USB.
+2. In the camera's **USB Connection** settings, select **Mass Storage**.
+3. Reconnect USB.
+4. In ILCE Toolkit, select the **Automatic** or **libusb** driver.
+5. Start the service session.
+
+**MTP mode cannot start a service session.**
+
+##### macOS USB permissions
+
+The macOS mass-storage driver can block access to the camera. If this happens:
+
+1. Select **Run with administrator access** when the app offers it, then approve
+   the macOS administrator dialog. This also applies to updater sessions,
+   WLAN/streaming and other actions blocked by the same driver.
+2. If access is still denied, manually grant **ILCE Toolkit** access under
+   **System Settings → Privacy & Security → Full Disk Access**, then restart
+   the app. Administrator authorization does not bypass this privacy check.
+3. After a local ad hoc rebuild, you may need to remove and re-add the app in
+   Full Disk Access because its code signature has changed.
+
+Normal MTP app installation and camera queries only request administrator rights
+if their USB access requires capturing the mass-storage interface.
+
+<details>
+<summary>Technical details: administrator access and macOS privacy</summary>
+
+Only the worker for the selected camera action is authorized. Its authenticated
+transport rejects requests for other actions and communicates with the GUI over
+an authenticated local socket.
+
+File operations use the invoking user's effective permissions. The worker raises
+its effective uid only around USB access and driver capture/restore.
+
+Before loading libusb, the authorized worker creates an audit session attributed
+to the invoking user. AppleScript's default administrator session has no audit
 user (`AU_DEFAUDITID`), which can prevent macOS from applying an existing privacy
-grant even though the worker runs as root.
-If macOS still refuses the mass-storage interface after authorization, check
-**System Settings → Privacy & Security → Full Disk Access** for **ILCE Toolkit**,
-then restart the app. Administrator authorization does not bypass that privacy
-check (see [Apple Developer Support discussion](https://developer.apple.com/forums/thread/844378)).
-This permission must be granted manually. Local ad-hoc rebuilds may require
-removing and adding the app again because its code signature changes.
+grant even when the worker runs as root. See the
+[Apple Developer Support discussion](https://developer.apple.com/forums/thread/844378).
 
-Camera operations run in a separate process and cannot overlap. Reports and
-exports are written through temporary files and only replace their targets on
-success. Sony tokens are sent to the worker over stdin and are not stored in
-preferences or passed on the command line. WLAN/streaming output can contain
-credentials, so handle exported files and logs accordingly. Sony's online
-services may no longer be available; the GUI reports backend failures.
+</details>
+
+##### Files, credentials and online services
+
+- **Reports and exports:** temporary files replace their targets only after the
+  operation succeeds.
+- **Sony tokens:** sent to the worker over stdin; they are not stored in
+  preferences or passed on the command line.
+- **WLAN/streaming logs:** can contain credentials. Handle exported files and logs
+  accordingly.
+- **Sony online services:** may no longer be available. The GUI reports backend
+  failures.
+
+##### Development checks
 
 Tests (no camera writes or network access):
 
