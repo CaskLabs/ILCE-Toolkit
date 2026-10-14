@@ -21,7 +21,7 @@ def main():
         return events
 
     data = next(event['value'] for event in invoke('diagnostics') if event['event'] == 'data')
-    if data['architecture'] != 'arm64' or not data['bundled'] or not data['libusb'] or not data['installer_certificate'] or not data['updater_models']:
+    if data['architecture'] != 'arm64' or not data['bundled'] or not data['libusb'] or not data['installer_certificate'] or not data['installer_tls'] or not data['updater_models']:
         raise RuntimeError('Unexpected bundle configuration: %s' % data)
     if not any(bundle.rglob('qtbase_de.qm')):
         raise RuntimeError('The German Qt translation is missing from the bundle.')
@@ -44,7 +44,7 @@ def main():
         if source.read_bytes() != restored.read_bytes():
             raise RuntimeError('Bundled conversion round trip failed.')
     subprocess.run(['codesign', '--verify', '--deep', '--strict', str(bundle)], check=True)
-    print('Verified arm64 app, English/German translations, bundled libusb, worker transport, APK/SPK round trip and code signature.')
+    print('Verified arm64 app, English/German translations, bundled libusb, installer TLS AES, worker transport, APK/SPK round trip and code signature.')
 
 
 if __name__ == '__main__':

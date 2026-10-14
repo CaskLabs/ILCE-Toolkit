@@ -32,6 +32,9 @@ a = Analysis(
     datas=datas,
     hiddenimports=['usb.backend.libusb1', 'usb.backend.libusb0',
                    'pmca.usb.driver.generic.qemu'],
+    # tlslite's deprecated-class wrappers inspect their callers' source.
+    # AES initialization fails when that source exists only in the PYZ archive.
+    module_collection_mode={'tlslite': 'pyz+py'},
     excludes=['tkinter', 'PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets'],
 )
 pyz = PYZ(a.pure)

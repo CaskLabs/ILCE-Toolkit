@@ -257,11 +257,19 @@ def dispatch(request, protocol, files):
     if key == 'diagnostics':
         import platform
         from usb.backend import libusb1
+        from tlslite.utils.cipherfactory import createAES
+        # Exercise the installer's AES-CBC path, including in frozen workers.
+        # A zero-key/zero-IV block has this known ciphertext (AES-128).
+        cipher = createAES(bytearray(16), bytearray(16), ['python'])
+        installer_tls = cipher.encrypt(bytearray(16)) == bytes.fromhex('66e94bd4ef8a2c3b884cfa59ca342b2e')
+        if not installer_tls:
+            raise RuntimeError('Installer TLS AES self-check failed.')
         available = libusb1.get_backend() is not None
         protocol.emit('data', kind='system', value=dict(platform=platform.platform(),
             architecture=platform.machine(), python=platform.python_version(), libusb=available,
             bundled=bool(getattr(sys, 'frozen', False)),
             installer_certificate=(Path(usb.scriptRoot) / 'certs' / 'localtest.me.pem').is_file(),
+            installer_tls=installer_tls,
             updater_models=len(list(usb.getFdats()))))
         if not available:
             raise RuntimeError(tr('libusb is missing. On macOS, run: brew install libusb.'))
